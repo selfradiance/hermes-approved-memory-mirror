@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.vitest/
+.DS_Store
+.hermes/
+HERMES_APPROVED_MEMORY_MIRROR_PROJECT_CONTEXT.md
