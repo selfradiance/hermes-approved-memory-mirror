@@ -52,11 +52,18 @@ interface StartedUiServer {
   url: string;
 }
 
+const POST_CONTENT_TYPE = "application/x-www-form-urlencoded";
+const FORBIDDEN_LOCAL_REQUEST = "Forbidden: invalid local request origin";
+
 export async function handleUiRequest(
   request: Request,
   runtime: HermesRuntimeOptions = {}
 ): Promise<Response> {
   const url = new URL(request.url);
+  const guard = guardLocalUiRequest(request, url);
+  if (guard) {
+    return guard;
+  }
 
   try {
     if (request.method === "GET" && url.pathname === "/") {
@@ -163,7 +170,7 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<Star
 
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
-  const url = `http://${host}:${actualPort}`;
+  const url = `http://${formatHostForUrl(host)}:${actualPort}`;
   return { server, host, port: actualPort, url };
 }
 
@@ -702,7 +709,7 @@ function htmlResponse(html: string, status = 200): Response {
 
 async function readForm(request: Request): Promise<URLSearchParams> {
   const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/x-www-form-urlencoded")) {
+  if (!contentType.toLowerCase().includes(POST_CONTENT_TYPE)) {
     return new URLSearchParams();
   }
   return new URLSearchParams(await request.text());
@@ -740,6 +747,102 @@ function assertLoopbackHost(host: string): void {
   if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
     throw new Error("HERmes UI must bind to localhost or another loopback address.");
   }
+}
+
+function guardLocalUiRequest(request: Request, url: URL): Response | undefined {
+  if (!isLoopbackHost(url.hostname)) {
+    return forbiddenResponse();
+  }
+
+  const hostHeader = request.headers.get("host");
+  if (hostHeader && !hostHeaderMatchesUrl(hostHeader, url)) {
+    return forbiddenResponse();
+  }
+
+  if (request.method !== "POST") {
+    return undefined;
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes(POST_CONTENT_TYPE)) {
+    return forbiddenResponse();
+  }
+
+  const fetchSite = request.headers.get("sec-fetch-site")?.toLowerCase();
+  if (fetchSite === "cross-site") {
+    return forbiddenResponse();
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return undefined;
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    if (originUrl.origin !== url.origin || !isLoopbackHost(originUrl.hostname)) {
+      return forbiddenResponse();
+    }
+  } catch {
+    return forbiddenResponse();
+  }
+
+  return undefined;
+}
+
+function hostHeaderMatchesUrl(hostHeader: string, url: URL): boolean {
+  const normalizedHost = normalizeHostHeader(hostHeader);
+  if (!normalizedHost || !isLoopbackHost(normalizedHost.hostname)) {
+    return false;
+  }
+  return (
+    canonicalHostname(normalizedHost.hostname) === canonicalHostname(url.hostname) &&
+    normalizedHost.port === url.port
+  );
+}
+
+function normalizeHostHeader(hostHeader: string): { hostname: string; port: string } | undefined {
+  const trimmed = hostHeader.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(`http://${trimmed}`);
+    return { hostname: parsed.hostname, port: parsed.port };
+  } catch {
+    if (trimmed === "::1") {
+      return { hostname: "::1", port: "" };
+    }
+    const rawIpv6WithPort = trimmed.match(/^(::1):(\d+)$/);
+    if (rawIpv6WithPort) {
+      return { hostname: "::1", port: rawIpv6WithPort[2] ?? "" };
+    }
+    return undefined;
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const canonical = canonicalHostname(hostname);
+  return canonical === "127.0.0.1" || canonical === "localhost" || canonical === "::1";
+}
+
+function canonicalHostname(hostname: string): string {
+  return hostname === "[::1]" ? "::1" : hostname;
+}
+
+function formatHostForUrl(host: string): string {
+  return host === "::1" ? "[::1]" : host;
+}
+
+function forbiddenResponse(): Response {
+  return new Response(FORBIDDEN_LOCAL_REQUEST, {
+    status: 403,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store"
+    }
+  });
 }
 
 function escapeHtml(value: string | number | boolean): string {

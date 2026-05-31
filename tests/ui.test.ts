@@ -25,10 +25,15 @@ function runtime(root: string): HermesRuntimeOptions {
   return { projectRoot: root };
 }
 
-function formRequest(pathname: string, fields: Record<string, string>): Request {
-  return new Request(`http://127.0.0.1${pathname}`, {
+function formRequest(
+  pathname: string,
+  fields: Record<string, string>,
+  headers: Record<string, string> = {},
+  origin = "http://127.0.0.1"
+): Request {
+  return new Request(`${origin}${pathname}`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
     body: new URLSearchParams(fields)
   });
 }
@@ -53,6 +58,69 @@ describe("HERmes Local Review UI", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("Local HERmes database initialized.");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
+  });
+
+  it("allows same-origin local POST requests", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(
+      formRequest(
+        "/init",
+        {},
+        {
+          host: "127.0.0.1:8787",
+          origin: "http://127.0.0.1:8787",
+          "sec-fetch-site": "same-origin"
+        },
+        "http://127.0.0.1:8787"
+      ),
+      runtime(root)
+    );
+
+    expect(response.status).toBe(200);
+    expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
+  });
+
+  it("rejects external Origin POST requests before state changes", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/drafts", { text: "This should be rejected." }, { origin: "https://example.com" }),
+      runtime(root)
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("Forbidden: invalid local request origin");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+  });
+
+  it("rejects cross-site Sec-Fetch-Site POST requests before state changes", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/drafts", { text: "This should also be rejected." }, { "sec-fetch-site": "cross-site" }),
+      runtime(root)
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("Forbidden: invalid local request origin");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+  });
+
+  it("rejects non-loopback Host POST requests before state changes", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/drafts", { text: "Host should reject this." }, { host: "evil.example:8787" }),
+      runtime(root)
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("Forbidden: invalid local request origin");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
   });
 
   it("creating a note through the UI creates a draft, not approved memory", async () => {

@@ -53,7 +53,7 @@ Open the local URL printed in the terminal, usually:
 http://127.0.0.1:8787
 ```
 
-The Local Review UI is local-only and binds to loopback, not `0.0.0.0`. It does not add LLM/API calls, connectors, accounts, telemetry, cloud sync, or autonomous actions.
+The Local Review UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It does not add LLM/API calls, connectors, accounts, telemetry, cloud sync, or autonomous actions.
 
 In the UI:
 
