@@ -62,6 +62,8 @@ npm run demo
 
 The demo uses `.hermes/demo.db`, imports `examples/zion-skank-workflow-note.md`, approves the first draft, searches for `Seedance`, reflects on the Zion Skank workflow, and exports approved memory to `.hermes/export/memories-export.json`.
 
+Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md).
+
 ## Data Model
 
 `memory_drafts` stores proposed memories created by intake. Drafts have `pending`, `approved`, or `rejected` status.
