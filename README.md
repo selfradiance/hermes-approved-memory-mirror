@@ -1,18 +1,18 @@
 # HERmes — Approved Memory Mirror
 
-HERmes v0.1 is a tiny local TypeScript/Node CLI memory mirror for James. It lets you manually add or import notes, review proposed memory drafts, approve or reject them, search approved memory, and generate deterministic reflection output from approved memory.
+HERmes is a tiny local TypeScript/Node memory mirror for James. It has a CLI and a localhost-only Local Review UI for adding notes, reviewing proposed memory drafts, approving or rejecting them, searching approved memory, and generating deterministic reflection output from approved memory.
 
 HERmes stores only human-approved memories. Intake creates drafts. Drafts are not memory.
 
 ## What It Is Not
 
-HERmes is not an autonomous agent. It does not act on the outside world, execute tools, run shell commands from the app, crawl files, connect to services, schedule background work, or call an LLM in v0.1.
+HERmes is not an autonomous agent. It does not act on the outside world, execute tools, run shell commands from the app, crawl files, connect to services, schedule background work, collect telemetry, or call an LLM.
 
 ## Safety Boundaries
 
-- CLI only; no web app.
+- Local CLI plus localhost-only Local Review UI; no public web app or cloud service.
 - SQLite only; runtime data stays under `.hermes/`.
-- No external connectors, MCP, browser automation, background daemon, scheduler, subagents, or network calls.
+- No external connectors, MCP, browser automation, background daemon, scheduler, subagents, telemetry, analytics, or external network calls.
 - No email, calendar, contacts, messaging, social, banking, exchange, wallet, GitHub, or YouTube access.
 - No shell execution or generated-code execution from the app.
 - File intake reads one explicitly supplied file only.
@@ -37,6 +37,34 @@ After building:
 ```bash
 node dist/cli.js doctor
 ```
+
+## Local Review UI
+
+To use HERmes without memorizing terminal commands:
+
+```bash
+npm install
+npm run ui
+```
+
+Open the local URL printed in the terminal, usually:
+
+```text
+http://127.0.0.1:8787
+```
+
+The Local Review UI is local-only and binds to loopback, not `0.0.0.0`. It does not add LLM/API calls, connectors, accounts, telemetry, cloud sync, or autonomous actions.
+
+In the UI:
+
+1. Open the local page.
+2. Initialize the local database if needed.
+3. Add a note to create a pending draft.
+4. Review and approve or reject the draft.
+5. Search approved memories or ask a reflection question.
+6. Export approved memory JSON locally.
+
+Only approved memories are used for list/search/reflect.
 
 ## Core Commands
 
@@ -82,6 +110,6 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 ## Future LLM Provider Interface
 
-v0.1 intentionally does not require Claude, Anthropic, or any other LLM API. The code includes small provider interfaces in `src/llm/types.ts` and a deterministic no-op implementation in `src/llm/noopProvider.ts`.
+HERmes intentionally does not require Claude, Anthropic, OpenAI, Ollama, or any other LLM API. The code includes small provider interfaces in `src/llm/types.ts` and a deterministic no-op implementation in `src/llm/noopProvider.ts`.
 
 Claude/Anthropic could be added later for memory proposal wording or reflection wording, but LLM output must never write memory directly. It may create drafts only, and human approval must remain mandatory.

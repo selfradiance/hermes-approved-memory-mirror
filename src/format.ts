@@ -82,7 +82,7 @@ export function formatDoctor(report: DoctorReport): string {
     `External connectors/tools configured: ${
       report.externalConnectorsConfigured || report.toolsConfigured ? "yes" : "no"
     }`,
-    "v0.1 posture: local CLI only; no connectors, no tools, no MCP, no background daemon, no LLM calls."
+    "HERmes posture: local CLI/local interface only; no connectors, no tools, no MCP, no background daemon, no LLM calls."
   ].join("\n");
 }
 
