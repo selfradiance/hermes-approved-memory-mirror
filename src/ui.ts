@@ -758,6 +758,37 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       <a href="/system">Diagnostics</a>
     </footer>
   </main>
+  <script>
+    (function () {
+      var form = document.querySelector("form.chat-compose");
+      if (!form) {
+        return;
+      }
+      var textarea = form.querySelector('textarea[name="message"]');
+      if (!textarea) {
+        return;
+      }
+      var submitting = false;
+      form.addEventListener("submit", function () {
+        submitting = true;
+      });
+      textarea.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" || event.shiftKey) {
+          return;
+        }
+        event.preventDefault();
+        if (submitting || !textarea.value.trim()) {
+          return;
+        }
+        submitting = true;
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+        } else {
+          form.submit();
+        }
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }

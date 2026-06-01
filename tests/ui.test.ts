@@ -98,6 +98,19 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain('href="/system"');
   });
 
+  it("includes an Enter-to-send keydown handler that respects Shift+Enter and empty input", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('textarea[name="message"]');
+    expect(html).toContain('event.key !== "Enter" || event.shiftKey');
+    expect(html).toContain("!textarea.value.trim()");
+    expect(html).toContain("requestSubmit");
+  });
+
   it("shows the conversation mode label and hides the prominent System button", async () => {
     const root = makeProject();
 
