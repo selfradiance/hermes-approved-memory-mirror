@@ -84,6 +84,8 @@ Underlying storage is unchanged. A memory suggestion saved for review is still p
 
 As of v0.3.0 the chat provider layer adds an optional Claude API mode. A subtle "Mode:" label on the chat page reflects the active provider, and the prominent "System" header button is replaced by a small footer "Diagnostics" link to `/system`. When the API is enabled, generated text and proposed suggestions still flow through the same human approval boundary.
 
+As of v0.4.3 the Sources page shows the suggestions just created by the latest "Suggest memories from this source" request inline, directly under the result notice, so the user can edit, approve, or dismiss each one without navigating to Review Memories. The inline cards reuse `renderDraft` and the existing `/drafts/approve` and `/drafts/reject` routes; a hidden `returnTo=sources` field (plus `sourceId` and a `batchIds` list) carries enough state to re-render the Sources page with the handled suggestion removed. Inline cards appear only for the latest batch's still-pending ids — the default Sources page shows none — so unrelated global pending drafts are not surfaced here. The approval boundary is unchanged: only explicit `approveDraft` writes `memory_entries`.
+
 ## Local UI Server
 
 `src/ui.ts` starts a Node HTTP server bound to loopback by default at `127.0.0.1:8787`. It refuses non-loopback hosts and rejects non-local/cross-site state-changing requests. The UI ensures the local SQLite schema exists on first request, so normal use does not require an initialization button.

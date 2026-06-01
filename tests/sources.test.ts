@@ -674,6 +674,139 @@ describe("sources UI memory suggestions", () => {
   });
 });
 
+describe("sources UI inline suggestion review", () => {
+  it("creates pending suggestions only, never approved memory, from /sources/suggest", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/sources/suggest", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ sourceId: String(summary.id), limit: "5" })
+      }),
+      runtime(root)
+    );
+
+    expect(response.status).toBe(200);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root)).length).toBeGreaterThan(0);
+  });
+
+  it("renders the just-created suggestions inline on the Sources page", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/sources/suggest", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ sourceId: String(summary.id), limit: "5" })
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Memory suggestions from this source");
+    // Inline cards carry the return context so approve/dismiss stay on Sources.
+    expect(html).toContain('name="returnTo" value="sources"');
+    expect(html).toContain('name="batchIds"');
+  });
+
+  it("approves an inline suggestion with edited text via the shared approval path", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+    const { drafts } = await suggestMemoriesFromSource(summary.id, runtime(root));
+    const draftId = drafts[0]!.id;
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/drafts/approve", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          draftId: String(draftId),
+          content: "Inline-edited memory approved from Sources.",
+          returnTo: "sources",
+          sourceId: String(summary.id),
+          batchIds: drafts.map((draft) => String(draft.id)).join(",")
+        })
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    // Re-renders the Sources page, not the chat page.
+    expect(html).toContain("Import a source");
+    const approved = listApprovedMemories(runtime(root));
+    expect(approved).toHaveLength(1);
+    expect(approved[0]?.content).toBe("Inline-edited memory approved from Sources.");
+    // The handled card is gone; remaining batch suggestions stay inline.
+    expect(html).not.toContain(`name="draftId" value="${draftId}"`);
+  });
+
+  it("dismisses an inline suggestion without creating approved memory", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+    const { drafts } = await suggestMemoriesFromSource(summary.id, runtime(root));
+    const draftId = drafts[0]!.id;
+    const before = listPendingDrafts(runtime(root)).length;
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/drafts/reject", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          draftId: String(draftId),
+          returnTo: "sources",
+          sourceId: String(summary.id),
+          batchIds: drafts.map((draft) => String(draft.id)).join(",")
+        })
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Import a source");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root)).length).toBe(before - 1);
+  });
+
+  it("does not show inline source suggestions on the default Sources page", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+    // Create pending suggestions, but then load the plain Sources page.
+    await suggestMemoriesFromSource(summary.id, runtime(root));
+    expect(listPendingDrafts(runtime(root)).length).toBeGreaterThan(0);
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/sources"),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).not.toContain("Memory suggestions from this source");
+  });
+});
+
 describe("sources UI", () => {
   it("imports a source through the local UI and never auto-approves memory", async () => {
     const root = makeProject();

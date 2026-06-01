@@ -156,7 +156,7 @@ In the `Sources` page (linked from the chat header) you can:
 2. See your sources with title, filename, import date, and excerpt count.
 3. Search inside your sources.
 4. View a source's excerpts.
-5. Use **Suggest memories from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it.
+5. Use **Suggest memories from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it. As of v0.4.3 the suggestions you just created appear **inline on the Sources page**, so you can edit, approve, or dismiss each one without leaving Sources.
 
 ### How source memory extraction works (v0.4.2)
 

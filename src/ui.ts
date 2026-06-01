@@ -72,6 +72,7 @@ interface RenderState {
   selectedSourceId?: number;
   sourceSearchQuery?: string;
   sourceSearchResults?: SourceChunkResult[];
+  suggestedDraftIds?: number[];
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -247,22 +248,27 @@ export async function handleUiRequest(
         updateDraftProposedContent(draftId, editedContent, runtime);
       }
       approveDraft(draftId, runtime);
-      return htmlResponse(
-        renderPage(runtime, {
-          notice: { kind: "success", message: "Approved memory. It’s now part of your approved memories." }
-        })
-      );
+      const notice: Notice = {
+        kind: "success",
+        message: "Approved memory. It’s now part of your approved memories."
+      };
+      const sourcesReturn = sourcesReturnState(form, draftId);
+      if (sourcesReturn) {
+        return htmlResponse(renderSourcesPage(runtime, { ...sourcesReturn, notice }));
+      }
+      return htmlResponse(renderPage(runtime, { notice }));
     }
 
     if (request.method === "POST" && url.pathname === "/drafts/reject") {
       const form = await readForm(request);
       const draftId = parseDraftId(requiredFormValue(form, "draftId", "Memory id is required."));
       rejectDraft(draftId, runtime);
-      return htmlResponse(
-        renderPage(runtime, {
-          notice: { kind: "info", message: "Dismissed." }
-        })
-      );
+      const notice: Notice = { kind: "info", message: "Dismissed." };
+      const sourcesReturn = sourcesReturnState(form, draftId);
+      if (sourcesReturn) {
+        return htmlResponse(renderSourcesPage(runtime, { ...sourcesReturn, notice }));
+      }
+      return htmlResponse(renderPage(runtime, { notice }));
     }
 
     if (request.method === "POST" && url.pathname === "/reflect") {
@@ -323,6 +329,7 @@ export async function handleUiRequest(
       return htmlResponse(
         renderSourcesPage(runtime, {
           selectedSourceId: sourceId,
+          suggestedDraftIds: drafts.map((draft) => draft.id),
           notice: {
             kind: drafts.length > 0 ? "success" : "info",
             message: buildSuggestionNotice(drafts.length, diagnostics.sourceChunkCount, diagnostics.requestedCount)
@@ -1152,6 +1159,18 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     selectedSource !== undefined ? getSourceChunks(selectedSource.id, runtime) : [];
   const sourceSearchQuery = state.sourceSearchQuery ?? "";
 
+  // Only the suggestions just created by the latest source request appear inline,
+  // and only while they remain pending (handled cards drop out automatically).
+  const suggestedDraftIds = state.suggestedDraftIds ?? [];
+  const inlineSuggestions =
+    model.canReadMemory && suggestedDraftIds.length > 0
+      ? model.pendingDrafts.filter((draft) => suggestedDraftIds.includes(draft.id))
+      : [];
+  const inlineReturnContext: DraftReturnContext | undefined =
+    state.selectedSourceId !== undefined
+      ? { sourceId: state.selectedSourceId, batchIds: inlineSuggestions.map((draft) => draft.id) }
+      : undefined;
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1232,6 +1251,18 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     </header>
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
+
+      ${
+        inlineSuggestions.length > 0
+          ? `<section aria-label="Memory suggestions from this source">
+        <h2>Memory suggestions from this source</h2>
+        <p class="hint">Review each one here. Approving adds it to your approved memories; dismissing discards it. Nothing is approved automatically.</p>
+        <div class="stack" style="margin-top: 14px;">
+          ${inlineSuggestions.map((draft) => renderDraft(draft, inlineReturnContext)).join("")}
+        </div>
+      </section>`
+          : ""
+      }
 
       <section>
         <h2>Import a source</h2>
@@ -1577,14 +1608,27 @@ function renderDrafts(drafts: MemoryDraft[]): string {
     return `<p class="empty">No memory suggestions waiting.</p>`;
   }
 
-  return `<div class="stack">${drafts.map(renderDraft).join("")}</div>`;
+  return `<div class="stack">${drafts.map((draft) => renderDraft(draft)).join("")}</div>`;
 }
 
-function renderDraft(draft: MemoryDraft): string {
+// When a card is reviewed inline on the Sources page, the approve/dismiss forms
+// carry enough context for the shared routes to re-render Sources and keep the
+// rest of this batch of suggestions visible.
+interface DraftReturnContext {
+  sourceId: number;
+  batchIds: number[];
+}
+
+function renderDraft(draft: MemoryDraft, returnContext?: DraftReturnContext): string {
   const sourceLine =
     draft.source_type === "source"
       ? `<p class="meta">From ${escapeHtml(draft.source_label)}</p>`
       : "";
+  const returnFields = returnContext
+    ? `<input type="hidden" name="returnTo" value="sources">
+      <input type="hidden" name="sourceId" value="${returnContext.sourceId}">
+      <input type="hidden" name="batchIds" value="${returnContext.batchIds.join(",")}">`
+    : "";
   return `<article class="item">
     <p class="item-title"><span>Memory suggestion</span></p>
     <p class="meta">Suggested as ${escapeHtml(draft.proposed_category)} · Tags: ${escapeHtml(
@@ -1593,6 +1637,7 @@ function renderDraft(draft: MemoryDraft): string {
     ${sourceLine}
     <form class="stack" method="post" action="/drafts/approve" style="margin-top: 10px;">
       <input type="hidden" name="draftId" value="${draft.id}">
+      ${returnFields}
       <label>
         Memory text
         <textarea class="draft-edit" name="content" rows="4">${escapeHtml(draft.proposed_content)}</textarea>
@@ -1603,6 +1648,7 @@ function renderDraft(draft: MemoryDraft): string {
     </form>
     <form method="post" action="/drafts/reject" style="margin-top: 8px;">
       <input type="hidden" name="draftId" value="${draft.id}">
+      ${returnFields}
       <button class="danger" type="submit">Dismiss</button>
     </form>
   </article>`;
@@ -1765,6 +1811,28 @@ function parseOptionalPositiveInteger(value: string): number | undefined {
     return undefined;
   }
   return parsePositiveInteger(trimmed, "Value");
+}
+
+// Inline source-review cards post here too. When they do, return the state needed
+// to re-render the Sources page with the rest of the just-created batch (minus the
+// suggestion that was just handled), instead of the main chat page.
+function sourcesReturnState(
+  form: URLSearchParams,
+  handledDraftId: number
+): { selectedSourceId?: number; suggestedDraftIds: number[] } | undefined {
+  if ((form.get("returnTo") ?? "") !== "sources") {
+    return undefined;
+  }
+  const selectedSourceId = parseOptionalPositiveInteger(form.get("sourceId") ?? "");
+  const remaining = parseIdList(form.get("batchIds") ?? "").filter((id) => id !== handledDraftId);
+  return { selectedSourceId, suggestedDraftIds: remaining };
+}
+
+function parseIdList(value: string): number[] {
+  return value
+    .split(",")
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((id) => Number.isInteger(id) && id > 0);
 }
 
 // Honest feedback: the whole source was reviewed, and the count is explained
