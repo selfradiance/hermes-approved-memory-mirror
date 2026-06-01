@@ -1744,7 +1744,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
           model.activeSessionId && model.latestHermesMessage ? "" : " disabled"
         }>Save for review</button>
       </form>
-      ${renderLatestMemorySources(model.latestHermesMessage, model.latestMemorySources)}
+      ${renderLatestMemorySources(model.latestMemorySources)}
       ${renderSourceExcerpts(model.latestSourceExcerpts)}
     </div>
   </div>`;
@@ -1784,14 +1784,11 @@ function renderChatMessage(message: ChatMessage, approvedMemories: MemoryEntry[]
   </article>`;
 }
 
-function renderLatestMemorySources(
-  latestHermesMessage: ChatMessage | undefined,
-  sources: UiMemorySource[]
-): string {
-  if (!latestHermesMessage) {
-    return `<div class="memory-sources"><p>Sources from your memory: none yet.</p></div>`;
+function renderLatestMemorySources(sources: UiMemorySource[]): string {
+  if (sources.length === 0) {
+    return "";
   }
-  return renderMemorySources(sources, "No approved memories were used for the latest response.");
+  return renderMemorySources(sources, "");
 }
 
 function renderMemorySuggestion(suggestion: MemorySuggestion): string {

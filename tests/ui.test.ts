@@ -107,6 +107,10 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("No chat messages yet.");
     expect(html).not.toContain("Started a new local chat session.");
     expect(html).not.toContain("Saving an exchange only saves it for review.");
+    expect(html).not.toContain("Sources from your memory: none yet.");
+    expect(html).not.toContain("Sources from your memory");
+    expect(html).not.toContain("No approved memories were used for the latest response.");
+    expect(html).not.toContain('class="memory-sources"');
     expect(html).toContain('placeholder="Message…"');
   });
 
