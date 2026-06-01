@@ -48,7 +48,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.4.3");
+    .version("0.4.4");
 
   program
     .command("init")
@@ -220,7 +220,9 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
       if (latestTurn.providerError) {
         out(`(Claude API was unavailable, so this reply used local deterministic mode: ${latestTurn.providerError})`);
       }
-      if (latestTurn.savedDraft) {
+      if (latestTurn.memoryRequestNeedsPayload) {
+        out("Paste the information you want remembered, and I will save it for review.");
+      } else if (latestTurn.savedDraft) {
         out("Saved as a draft. Review and approve it before it becomes memory.");
       } else if (latestTurn.memorySuggestion) {
         out(

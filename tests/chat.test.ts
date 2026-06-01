@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createChatResponse,
   dismissMemorySuggestion,
+  extractMemoryPayloadFromUserMessage,
   getLatestMemorySuggestion,
   listChatMessages,
   listChatSessions,
@@ -157,7 +158,82 @@ describe("HERmes v0.2 chat", () => {
     expect(turn.savedDraft?.status).toBe("pending");
     expect(turn.savedDraft?.source_label).toBe(`chat_session:${turn.session.id}:message:${turn.userMessage.id}`);
     expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.proposed_content).toBe("I prefer deterministic memory mirrors over automation agents.");
+    expect(drafts[0]?.proposed_content).toBe("James prefers deterministic memory mirrors over automation agents.");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("command-only remember requests do not create pending drafts", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const turn = await sendChatMessage("Can you remember this?", runtime(root));
+
+    expect(turn.memoryRequestNeedsPayload).toBe(true);
+    expect(turn.memorySuggestion).toBeUndefined();
+    expect(turn.savedDraft).toBeUndefined();
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("extracts blank-line remember payloads instead of the command phrase", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const turn = await sendChatMessage(
+      [
+        "Can you remember this?",
+        "",
+        "I prefer inline source suggestions because jumping between pages is annoying."
+      ].join("\n"),
+      runtime(root)
+    );
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(extractMemoryPayloadFromUserMessage(turn.userMessage.content)).toEqual({
+      kind: "payload",
+      payload: "James prefers inline source suggestions because jumping between pages is annoying."
+    });
+    expect(turn.savedDraft?.status).toBe("pending");
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.proposed_content).toContain("inline source suggestions");
+    expect(drafts[0]?.proposed_content).not.toContain("Can you remember this");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("extracts colon remember payloads", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    await sendChatMessage(
+      "Please remember this: I prefer to review source suggestions inline.",
+      runtime(root)
+    );
+    const [draft] = listPendingDrafts(runtime(root));
+
+    expect(draft?.proposed_content).toBe("James prefers to review source suggestions inline.");
+    expect(draft?.proposed_content).not.toContain("Please remember this");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("extracts multi-paragraph remember-it-all payloads", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    await sendChatMessage(
+      [
+        "Can you remember it all?",
+        "",
+        "The source review flow should keep suggestions inline on the Sources page.",
+        "",
+        "Jumping between pages makes memory review feel mechanical and easy to lose."
+      ].join("\n"),
+      runtime(root)
+    );
+    const [draft] = listPendingDrafts(runtime(root));
+
+    expect(draft?.proposed_content).toContain("source review flow");
+    expect(draft?.proposed_content).toContain("Jumping between pages");
+    expect(draft?.proposed_content).not.toContain("Can you remember it all");
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 

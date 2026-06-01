@@ -356,6 +356,23 @@ describe("HERmes Local Web Chat UI", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 
+  it("command-only remember requests ask for payload instead of creating a draft", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/chat/send", { message: "Can you remember this?" }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Paste the information you want remembered");
+    expect(html).not.toContain("This seems worth remembering.");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
   it("saving an organic suggestion creates a pending draft only", async () => {
     const root = makeProject();
     initHermes(runtime(root));

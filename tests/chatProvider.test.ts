@@ -179,6 +179,43 @@ describe("chat provider abstraction", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 
+  it("filters provider-suggested remember command phrases before draft creation", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const provider = new FakeApiProvider({
+      responseText: "I can help with that.",
+      proposedMemoryText: "Can you remember it all?",
+      mode: "reflection",
+      ideaCandidates: []
+    });
+
+    const turn = await sendChatMessage(
+      "I prefer memory review prompts to stay inline with the material I am reviewing.",
+      {
+        ...runtime(root),
+        chatProvider: provider
+      }
+    );
+
+    expect(turn.memorySuggestion?.proposedContent).toContain("I prefer memory review prompts");
+    expect(turn.memorySuggestion?.proposedContent).not.toContain("Can you remember it all");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+
+    const draft = saveSuggestedMemoryDraft(
+      {
+        proposedContent: turn.memorySuggestion?.proposedContent ?? "",
+        sourceSessionId: turn.session.id,
+        sourceMessageId: turn.userMessage.id,
+        suggestionKey: turn.memorySuggestion?.suggestionKey ?? ""
+      },
+      runtime(root)
+    );
+
+    expect(draft.proposed_content).not.toContain("Can you remember it all");
+    expect(draft.status).toBe("pending");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
   it("falls back to deterministic output when the API provider fails", async () => {
     const root = makeProject();
     initHermes(runtime(root));

@@ -206,6 +206,7 @@ export interface ChatTurn {
   response: ChatResponse;
   memorySuggestion?: MemorySuggestion;
   savedDraft?: MemoryDraft;
+  memoryRequestNeedsPayload?: boolean;
   providerId: ChatProviderId;
   providerLabel: string;
   providerError?: string;

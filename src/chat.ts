@@ -30,6 +30,45 @@ const IDEA_PROMPT_RE =
 const DIRECT_MEMORY_REQUEST_RE =
   /^(?:please\s+)?(?:remember(?:\s+that)?|save\s+this|save\s+that|add\s+(?:this|that)\s+to\s+memory|add\s+to\s+memory)\s*[:,-]?\s*(.+)$/i;
 
+const MEMORY_INTENT_RE =
+  /\b(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:remember|save)\s+(?:this|that|it|all\s+this|it\s+all|everything)\b|\b(?:remember\s+that|add\s+(?:this|that|it|all\s+this|everything)\s+to\s+memory|add\s+to\s+memory)\b/i;
+
+const MEMORY_REQUEST_LINE_RE =
+  /^(?:just\s+wondering\b.*?\.\s*)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:(?:remember|save)\s+(?:this|that|it|all\s+this|it\s+all|everything)|add\s+(?:this|that|it|all\s+this|everything)\s+to\s+memory|add\s+to\s+memory)\??(?:\s+(?:for\s+me|please|thank\s+you|thanks))?\.?$/i;
+
+const INLINE_MEMORY_PAYLOAD_RES = [
+  /^(?:please\s+)?(?:remember(?:\s+that)?|save\s+(?:this|that|it|all\s+this|everything)|add\s+(?:this|that|it|all\s+this|everything)\s+to\s+memory|add\s+to\s+memory)\s*[:,-]\s*(.+)$/is,
+  /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:remember|save)\s+(?:this|that|it|all\s+this|it\s+all|everything)\??\s*[:,-]\s*(.+)$/is,
+  /^(?:please\s+)?remember\s+that\s+(.+)$/is
+] as const;
+
+const USELESS_MEMORY_PAYLOADS = new Set([
+  "this",
+  "that",
+  "it",
+  "all this",
+  "it all",
+  "everything",
+  "remember this",
+  "remember that",
+  "please remember this",
+  "please remember all this",
+  "can you remember this",
+  "can you remember that",
+  "can you remember it",
+  "can you remember it all",
+  "can you remember all this",
+  "could you remember this",
+  "would you remember this",
+  "save this",
+  "save that",
+  "please save this",
+  "can you save this",
+  "add this to memory",
+  "add that to memory",
+  "add to memory"
+]);
+
 const MEMORY_SIGNAL_PATTERNS = [
   /\bi want\b/i,
   /\bi prefer\b/i,
@@ -239,11 +278,11 @@ export async function sendChatMessage(
   }
 
   const base: ChatTurn = { ...persistedTurn, providerId, providerLabel, providerError };
+  const memoryPayload = extractMemoryPayloadFromUserMessage(normalized);
 
-  const directMemoryText = extractDirectMemoryRequest(normalized);
-  if (directMemoryText) {
+  if (memoryPayload.kind === "payload") {
     const savedDraft = createDraftFromText(
-      directMemoryText,
+      memoryPayload.payload,
       "chat",
       memorySuggestionSourceLabel(persistedTurn.session.id, persistedTurn.userMessage.id),
       options
@@ -251,13 +290,20 @@ export async function sendChatMessage(
     return { ...base, savedDraft };
   }
 
+  if (memoryPayload.kind === "request_without_payload") {
+    return { ...base, memoryRequestNeedsPayload: true };
+  }
+
   const proposedFromProvider = generation.proposedMemoryText?.trim();
-  const memorySuggestion = proposedFromProvider
-    ? createMemorySuggestion(proposedFromProvider, {
+  const providerSuggestion = proposedFromProvider
+    ? createProviderMemorySuggestion(proposedFromProvider, normalized, {
         sessionId: persistedTurn.session.id,
         messageId: persistedTurn.userMessage.id
       })
-    : suggestMemoryFromUserMessage(normalized, {
+    : undefined;
+  const memorySuggestion =
+    providerSuggestion ??
+    suggestMemoryFromUserMessage(normalized, {
         sessionId: persistedTurn.session.id,
         messageId: persistedTurn.userMessage.id
       });
@@ -353,7 +399,7 @@ export function suggestMemoryFromUserMessage(
   context: { sessionId?: number; messageId?: number } = {}
 ): MemorySuggestion | undefined {
   const normalized = normalizeUserMemoryText(userInput);
-  if (!normalized || extractDirectMemoryRequest(normalized)) {
+  if (!normalized || extractMemoryPayloadFromUserMessage(normalized).kind !== "none") {
     return undefined;
   }
 
@@ -363,6 +409,35 @@ export function suggestMemoryFromUserMessage(
   }
 
   return createMemorySuggestion(candidate, context);
+}
+
+export function extractMemoryPayloadFromUserMessage(
+  userInput: string
+):
+  | { kind: "none" }
+  | { kind: "request_without_payload" }
+  | { kind: "payload"; payload: string } {
+  const normalized = normalizeUserMemoryText(userInput);
+  if (!normalized || !MEMORY_INTENT_RE.test(normalized)) {
+    return { kind: "none" };
+  }
+
+  const paragraphPayload = extractPayloadAfterRequestParagraph(normalized);
+  if (paragraphPayload) {
+    return { kind: "payload", payload: paragraphPayload };
+  }
+
+  const inlinePayload = extractInlineMemoryPayload(normalized);
+  if (inlinePayload) {
+    return { kind: "payload", payload: inlinePayload };
+  }
+
+  const linePayload = extractPayloadAfterRequestLine(normalized);
+  if (linePayload) {
+    return { kind: "payload", payload: linePayload };
+  }
+
+  return { kind: "request_without_payload" };
 }
 
 export function getLatestMemorySuggestion(
@@ -406,9 +481,17 @@ export function saveSuggestedMemoryDraft(
     throw new Error("Suggested memory text is required.");
   }
 
-  assertUserChatMessageExists(suggestion.sourceSessionId, suggestion.sourceMessageId, options);
+  const sourceMessage = getUserChatMessageOrThrow(
+    suggestion.sourceSessionId,
+    suggestion.sourceMessageId,
+    options
+  );
+  const guardedContent = guardMemorySuggestionContent(content, sourceMessage.content);
+  if (!guardedContent) {
+    throw new Error("Suggested memory text needs actual information to remember.");
+  }
   const draft = createDraftFromText(
-    content,
+    guardedContent,
     "chat",
     memorySuggestionSourceLabel(suggestion.sourceSessionId, suggestion.sourceMessageId),
     options
@@ -544,12 +627,6 @@ function buildIdeaCandidates(userInput: string, memoriesUsed: SearchResult[]): I
   return candidates;
 }
 
-function extractDirectMemoryRequest(userInput: string): string | undefined {
-  const match = normalizeUserMemoryText(userInput).match(DIRECT_MEMORY_REQUEST_RE);
-  const content = match?.[1]?.trim();
-  return content ? content : undefined;
-}
-
 function extractDurableMemoryCandidate(userInput: string): string | undefined {
   const normalized = normalizeUserMemoryText(userInput);
   if (!normalized || normalized.startsWith("/") || GREETING_OR_TINY_RE.test(normalized)) {
@@ -575,6 +652,55 @@ function extractDurableMemoryCandidate(userInput: string): string | undefined {
   }
 
   return stripTrailingCommandTone(durableSentence);
+}
+
+function extractPayloadAfterRequestParagraph(userInput: string): string | undefined {
+  const paragraphs = userInput
+    .split(/\n\s*\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  if (paragraphs.length < 2 || !paragraphContainsMemoryRequest(paragraphs[0] ?? "")) {
+    return undefined;
+  }
+
+  return cleanMemoryPayload(paragraphs.slice(1).join("\n\n"));
+}
+
+function extractInlineMemoryPayload(userInput: string): string | undefined {
+  for (const pattern of INLINE_MEMORY_PAYLOAD_RES) {
+    const match = userInput.match(pattern);
+    const payload = match?.[1];
+    const cleaned = payload ? cleanMemoryPayload(payload) : undefined;
+    if (cleaned) {
+      return cleaned;
+    }
+  }
+
+  const directMatch = userInput.match(DIRECT_MEMORY_REQUEST_RE);
+  const directPayload = directMatch?.[1];
+  return directPayload ? cleanMemoryPayload(directPayload) : undefined;
+}
+
+function extractPayloadAfterRequestLine(userInput: string): string | undefined {
+  const lines = userInput
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const requestLineIndex = lines.findIndex((line) => isMemoryRequestOnly(line));
+  if (requestLineIndex === -1 || requestLineIndex === lines.length - 1) {
+    return undefined;
+  }
+
+  return cleanMemoryPayload(lines.slice(requestLineIndex + 1).join("\n"));
+}
+
+function createProviderMemorySuggestion(
+  proposedContent: string,
+  userInput: string,
+  context: { sessionId?: number; messageId?: number }
+): MemorySuggestion | undefined {
+  const guarded = guardMemorySuggestionContent(proposedContent, userInput, { allowEmpty: true });
+  return guarded ? createMemorySuggestion(guarded, context) : undefined;
 }
 
 function createMemorySuggestion(
@@ -626,19 +752,97 @@ function isSuggestionDismissed(
   return Boolean(row);
 }
 
-function assertUserChatMessageExists(
+function guardMemorySuggestionContent(
+  proposedContent: string,
+  sourceMessageContent: string,
+  options: { allowEmpty?: boolean } = {}
+): string | undefined {
+  const cleaned = cleanMemoryPayload(proposedContent);
+  if (cleaned && !isUselessMemoryPayload(cleaned)) {
+    return cleaned;
+  }
+
+  const sourcePayload = extractMemoryPayloadFromUserMessage(sourceMessageContent);
+  if (sourcePayload.kind === "payload") {
+    return sourcePayload.payload;
+  }
+
+  if (options.allowEmpty) {
+    return undefined;
+  }
+  throw new Error("Suggested memory text needs actual information to remember.");
+}
+
+function cleanMemoryPayload(payload: string): string | undefined {
+  const normalized = payload
+    .replace(/\r\n/g, "\n")
+    .replace(/^[\s>:`"'-]+/, "")
+    .replace(/[\s`"']+$/, "")
+    .replace(/\s+(?:thank you|thanks)\.?$/i, "")
+    .trim();
+  if (!normalized || isUselessMemoryPayload(normalized)) {
+    return undefined;
+  }
+
+  return normalizePayloadPerspective(normalized);
+}
+
+function isUselessMemoryPayload(value: string): boolean {
+  const normalized = normalizeCommandText(value);
+  if (!normalized) {
+    return true;
+  }
+  if (USELESS_MEMORY_PAYLOADS.has(normalized)) {
+    return true;
+  }
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words.length <= 5 && MEMORY_REQUEST_LINE_RE.test(value.trim());
+}
+
+function paragraphContainsMemoryRequest(paragraph: string): boolean {
+  return MEMORY_INTENT_RE.test(paragraph);
+}
+
+function isMemoryRequestOnly(line: string): boolean {
+  return MEMORY_REQUEST_LINE_RE.test(line.trim()) || USELESS_MEMORY_PAYLOADS.has(normalizeCommandText(line));
+}
+
+function normalizeCommandText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[?.!,;:]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizePayloadPerspective(payload: string): string {
+  return payload
+    .replace(/^I prefer\b/i, "James prefers")
+    .replace(/^I don['’]?t want\b/i, "James does not want")
+    .replace(/^I want\b/i, "James wants")
+    .replace(/^I love\b/i, "James loves")
+    .replace(/^I hate\b/i, "James hates")
+    .replace(/^I dislike\b/i, "James dislikes")
+    .replace(/^My goal is\b/i, "James's goal is")
+    .replace(/^I['’]?m working on\b/i, "James is working on")
+    .trim();
+}
+
+function getUserChatMessageOrThrow(
   sessionId: number,
   messageId: number,
   options: HermesRuntimeOptions
-): void {
+): ChatMessage {
   const db = openExistingChatDb(options);
   try {
-    const row = db
-      .prepare("SELECT id FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'")
-      .get(messageId, sessionId);
-    if (!row) {
+    const message = db
+      .prepare("SELECT * FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'")
+      .get(messageId, sessionId) as ChatMessage | undefined;
+    if (!message) {
       throw new Error(`Chat message ${messageId} was not found in session ${sessionId}.`);
     }
+    return message;
   } finally {
     db.close();
   }

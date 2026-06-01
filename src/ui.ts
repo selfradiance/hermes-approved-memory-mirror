@@ -125,7 +125,12 @@ export async function handleUiRequest(
         renderPage(runtime, {
           activeSessionId: chatTurn.session.id,
           chatTurn,
-          notice: chatTurn.providerError
+          notice: chatTurn.memoryRequestNeedsPayload
+            ? {
+                kind: "info",
+                message: "Paste the information you want remembered, and I’ll save it for review."
+              }
+            : chatTurn.providerError
             ? {
                 kind: "info",
                 message: `Claude API was unavailable, so Approved Mind Mirror replied in local deterministic mode. (${chatTurn.providerError})`
