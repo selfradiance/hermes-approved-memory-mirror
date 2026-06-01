@@ -1,15 +1,17 @@
-# HERmes — Approved Memory Mirror
+# Approved Mind Mirror
 
-HERmes is a private local memory mirror and idea partner. You chat with it in a simple local browser window. As you talk, HERmes may notice something worth remembering and suggest it. Nothing becomes an approved memory until you approve it.
+A private memory companion that remembers only what you approve.
 
-HERmes stores only memories you approve. Chat can suggest memories and save them for review, but a memory suggestion saved for review is not an approved memory until you approve it. The CLI remains available for advanced use.
+Approved Mind Mirror (originally codenamed HERmes) is a private local memory mirror and idea partner. You chat with it in a simple local browser window. As you talk, it may notice something worth remembering and suggest it. Nothing becomes an approved memory until you approve it.
+
+Approved Mind Mirror stores only memories you approve. Chat can suggest memories and save them for review, but a memory suggestion saved for review is not an approved memory until you approve it. The CLI remains available for advanced use.
 
 ## Conversation Modes
 
-HERmes has two chat modes, selected by environment variables only:
+Approved Mind Mirror has two chat modes, selected by environment variables only:
 
 - **Local deterministic (default).** Fully offline. No network calls. Chat responses come from a local rule-based engine. This is the mode unless you explicitly opt in to the API.
-- **Claude API (optional).** When you set the environment variables below, HERmes sends your chat message, recent chat context, and the retrieved approved memories to the Anthropic Claude API to generate the response wording.
+- **Claude API (optional).** When you set the environment variables below, Approved Mind Mirror sends your chat message, recent chat context, and the retrieved approved memories to the Anthropic Claude API to generate the response wording.
 
 ```bash
 export HERMES_CHAT_PROVIDER=anthropic
@@ -22,12 +24,12 @@ Be honest about what API mode means:
 - It is **not** fully local. Your chat message, recent chat turns, and the selected approved-memory snippets are sent to Anthropic to produce the reply.
 - It still has **no tools**. The model cannot browse, run code, call connectors, or take any action.
 - It still **cannot approve memory**. Anything the model proposes becomes a "save for review" suggestion only; human approval through the review flow is the only way a memory is approved.
-- If the API key is missing or the call fails, HERmes silently falls back to local deterministic mode and tells you it did so.
+- If the API key is missing or the call fails, Approved Mind Mirror silently falls back to local deterministic mode and tells you it did so.
 - The API key is read from the environment for the single model call. It is never written to SQLite, logged, surfaced in the UI, included in errors, or written to exports.
 
 ## What It Is Not
 
-HERmes is not an autonomous agent. It does not act on the outside world, execute tools, run shell commands from the app, crawl files, connect to services, schedule background work, or collect telemetry. In optional Claude API mode it may generate chat text and memory-suggestion wording, but it still takes no actions and cannot approve memory.
+Approved Mind Mirror is not an autonomous agent. It does not act on the outside world, execute tools, run shell commands from the app, crawl files, connect to services, schedule background work, or collect telemetry. In optional Claude API mode it may generate chat text and memory-suggestion wording, but it still takes no actions and cannot approve memory.
 
 ## Safety Boundaries
 
@@ -62,7 +64,7 @@ node dist/cli.js doctor
 
 ## Local Web Chat UI
 
-To use HERmes conversationally in a browser:
+To use Approved Mind Mirror conversationally in a browser:
 
 ```bash
 ./scripts/start-local-ui.sh
@@ -91,9 +93,9 @@ The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rej
 
 In the UI:
 
-1. Chat with HERmes in the browser.
-2. See HERmes responses and the sources from your memory used.
-3. Let HERmes suggest a memory when something in chat seems worth remembering.
+1. Chat with Approved Mind Mirror in the browser.
+2. See its responses and the sources from your memory used.
+3. Let it suggest a memory when something in chat seems worth remembering.
 4. Edit, save for review, or dismiss a memory suggestion.
 5. Save the latest exchange for review.
 6. Review memory suggestions, then approve a memory or dismiss it.
@@ -102,7 +104,7 @@ In the UI:
 
 Only approved memories are used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve a memory.
 
-HERmes sets itself up automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics. If you have no approved memories yet, just start chatting; HERmes will suggest memories when something seems worth saving.
+Approved Mind Mirror sets itself up automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics. If you have no approved memories yet, just start chatting; it will suggest memories when something seems worth saving.
 
 What the UI cannot do:
 
@@ -115,7 +117,7 @@ What the UI cannot do:
 
 ## Organic Memory Capture
 
-HERmes v0.2.3 notices simple durable statements in chat with deterministic rules. Examples include "I prefer...", "My goal is...", "Going forward...", "I'm working on...", "I decided...", and "What matters to me is...".
+Approved Mind Mirror v0.2.3 notices simple durable statements in chat with deterministic rules. Examples include "I prefer...", "My goal is...", "Going forward...", "I'm working on...", "I decided...", and "What matters to me is...".
 
 When a candidate appears, the UI shows a small card:
 
@@ -127,7 +129,7 @@ From this chat
 [Save for review] [Edit] [Dismiss]
 ```
 
-After you save, HERmes says "Saved for review. Approve it when you’re ready." If you say "remember that...", "save this...", or "add this to memory...", HERmes saves it for review immediately and tells you to approve it when ready. It still does not create an approved memory. Approval remains explicit through the review flow.
+After you save, Approved Mind Mirror says "Saved for review. Approve it when you’re ready." If you say "remember that...", "save this...", or "add this to memory...", it saves it for review immediately and tells you to approve it when ready. It still does not create an approved memory. Approval remains explicit through the review flow.
 
 Flow:
 
@@ -171,7 +173,7 @@ Inside chat:
 
 `/save-draft` never creates approved memory. It creates a pending draft with source `chat`, and the existing review/approve flow remains the only way to turn that draft into approved memory.
 
-When you ask for ideas, possibilities, directions, creative sparks, project ideas, content ideas, or "what does this make you think of", HERmes switches into idea mode. It returns 3 to 5 deterministic idea candidates, why each fits, which approved memory IDs inspired it, and the smallest next artifact for each idea.
+When you ask for ideas, possibilities, directions, creative sparks, project ideas, content ideas, or "what does this make you think of", Approved Mind Mirror switches into idea mode. It returns 3 to 5 deterministic idea candidates, why each fits, which approved memory IDs inspired it, and the smallest next artifact for each idea.
 
 Example:
 
@@ -220,7 +222,7 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 `memory_events` stores audit events for draft creation, approval, rejection, memory creation, and export.
 
-`chat_sessions` and `chat_messages` store local web and terminal chat history. HERmes messages record the approved memory IDs used for each response.
+`chat_sessions` and `chat_messages` store local web and terminal chat history. Assistant messages record the approved memory IDs used for each response.
 
 `memory_suggestion_dismissals` stores local dismissal markers so an ignored organic suggestion does not keep reappearing for the same chat message.
 
@@ -234,7 +236,7 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 ## Chat Provider Interface
 
-HERmes does not require any LLM API to run. Chat goes through a small provider interface (`ChatProvider` in `src/types.ts`):
+Approved Mind Mirror does not require any LLM API to run. Chat goes through a small provider interface (`ChatProvider` in `src/types.ts`):
 
 - `DeterministicChatProvider` (in `src/chat.ts`) is the default. It is fully local and offline.
 - `AnthropicChatProvider` (in `src/llm/anthropicChatProvider.ts`) is optional and selected only when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set.

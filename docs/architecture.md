@@ -1,6 +1,6 @@
 # Architecture
 
-HERmes v0.3.0 is a local approved-memory mirror with a localhost-only web chat UI, a small SQLite-backed service layer, organic memory suggestions, a chat provider layer with an optional Claude API mode, and an advanced CLI. The browser UI is local-only; it is not an external web app and does not add automation capabilities.
+Approved Mind Mirror (internal/codename HERmes) is a local approved-memory mirror with a localhost-only web chat UI, a small SQLite-backed service layer, organic memory suggestions, a chat provider layer with an optional Claude API mode, and an advanced CLI. The browser UI is local-only; it is not an external web app and does not add automation capabilities.
 
 ## Components
 
@@ -57,7 +57,7 @@ As of v0.3.0 the chat provider layer adds an optional Claude API mode. A subtle 
 
 `src/ui.ts` starts a Node HTTP server bound to loopback by default at `127.0.0.1:8787`. It refuses non-loopback hosts and rejects non-local/cross-site state-changing requests. The UI ensures the local SQLite schema exists on first request, so normal use does not require an initialization button.
 
-The default page is intentionally chat-first: app name, a subtle conversation-mode label, chat history, message input, HERmes responses, subtle memory sources, organic memory suggestions, save-for-review, add-memory, and review of memory suggestions. Technical diagnostics, database path, table status, approved-memory search, deterministic reflection, and local JSON export live behind `/system`, reached only via a small footer "Diagnostics" link.
+The default page is intentionally chat-first: app name, a subtle conversation-mode label, chat history, message input, assistant responses, subtle memory sources, organic memory suggestions, save-for-review, add-memory, and review of memory suggestions. Technical diagnostics, database path, table status, approved-memory search, deterministic reflection, and local JSON export live behind `/system`, reached only via a small footer "Diagnostics" link.
 
 The server calls the existing service functions directly. It introduces no external connectors, MCP, browser automation, shell execution, scheduler, daemon, subagents, account access, or autonomous actions. The only optional outbound network call is the configured Claude API model endpoint, used purely for chat text generation when API mode is enabled; the model still receives no tools and cannot approve memory.
 
@@ -67,10 +67,10 @@ Runtime data is stored under `.hermes/`. The default database is `.hermes/hermes
 
 Approved memories are append-only. Corrections should later use `supersedes_id` and tombstone-style behavior rather than silent mutation.
 
-Chat sessions and messages are stored in `chat_sessions` and `chat_messages` in the same local SQLite database. HERmes messages record the approved memory IDs used for that response.
+Chat sessions and messages are stored in `chat_sessions` and `chat_messages` in the same local SQLite database. Assistant messages record the approved memory IDs used for that response.
 
 Dismissed organic suggestions are stored in `memory_suggestion_dismissals`, keyed to the local chat session, user message, and deterministic suggestion hash. This prevents the same suggestion from reappearing after the user dismisses or saves it.
 
 The approved-memory invariant is unchanged: only explicit draft approval writes `memory_entries`. Intake, chat save, direct remember requests, organic suggestion save, and generated reflection create drafts or temporary output only.
 
-Memory candidate detection in local deterministic mode is rule-based. It looks for durable user statements such as preferences, goals, project/workflow statements, settled decisions, and "remember that..." requests. It avoids greetings, tiny vague messages, temporary statements, commands, and system/debug-like text. It does not inspect HERmes responses unless the user explicitly saves the full exchange. In optional Claude API mode the model may additionally return a `MEMORY_SUGGESTION:` line that becomes a save-for-review suggestion; it is still subject to the same human approval boundary.
+Memory candidate detection in local deterministic mode is rule-based. It looks for durable user statements such as preferences, goals, project/workflow statements, settled decisions, and "remember that..." requests. It avoids greetings, tiny vague messages, temporary statements, commands, and system/debug-like text. It does not inspect assistant responses unless the user explicitly saves the full exchange. In optional Claude API mode the model may additionally return a `MEMORY_SUGGESTION:` line that becomes a save-for-review suggestion; it is still subject to the same human approval boundary.

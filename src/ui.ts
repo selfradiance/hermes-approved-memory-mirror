@@ -111,7 +111,7 @@ export async function handleUiRequest(
           notice: chatTurn.providerError
             ? {
                 kind: "info",
-                message: `Claude API was unavailable, so HERmes replied in local deterministic mode. (${chatTurn.providerError})`
+                message: `Claude API was unavailable, so Approved Mind Mirror replied in local deterministic mode. (${chatTurn.providerError})`
               }
             : chatTurn.savedDraft
               ? {
@@ -204,7 +204,7 @@ export async function handleUiRequest(
       initHermes(runtime);
       return htmlResponse(
         renderPage(runtime, {
-          notice: { kind: "success", message: "Local HERmes database initialized." }
+          notice: { kind: "success", message: "Local memory database initialized." }
         })
       );
     }
@@ -304,7 +304,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HERmes</title>
+  <title>Approved Mind Mirror</title>
   <style>
     :root {
       color-scheme: light;
@@ -698,7 +698,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
   <main class="app-shell">
     <header class="app-header">
       <div>
-        <h1>HERmes</h1>
+        <h1>Approved Mind Mirror</h1>
       </div>
       <nav class="top-actions" aria-label="App actions">
         <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
@@ -719,7 +719,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       ${
         model.approvedMemories.length === 0
           ? `<div class="onboarding">
-              <p>Just start chatting. HERmes will suggest memories when something seems worth saving.</p>
+              <p>Just start chatting. Approved Mind Mirror will suggest memories when something seems worth saving.</p>
               <a class="link-button" href="#add-memory">Add memory</a>
             </div>`
           : ""
@@ -734,7 +734,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
           <form class="stack" method="post" action="/drafts">
             <label>
               Paste a note
-              <textarea name="text" required placeholder="Paste something HERmes should remember after you approve it."></textarea>
+              <textarea name="text" required placeholder="Paste something to remember after you approve it."></textarea>
             </label>
             <div class="actions">
               <button type="submit">Save for review</button>
@@ -798,7 +798,7 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HERmes System</title>
+  <title>Approved Mind Mirror System</title>
   <style>
     :root {
       color-scheme: light;
@@ -1119,7 +1119,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
       ${sessionInput}
       <label>
         <span class="sr-only">Message</span>
-        <textarea name="message" required${disabled} placeholder="Message HERmes…"></textarea>
+        <textarea name="message" required${disabled} placeholder="Message…"></textarea>
       </label>
       <div class="chat-toolbar">
         <div class="actions">
@@ -1128,7 +1128,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         <p class="hint">${
           model.canReadMemory
             ? "Saving an exchange only saves it for review."
-            : "HERmes could not open your local memory store."
+            : "Approved Mind Mirror could not open your local memory store."
         }</p>
       </div>
     </form>
@@ -1146,7 +1146,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
 }
 
 function renderChatMessage(message: ChatMessage, approvedMemories: MemoryEntry[]): string {
-  const speaker = message.role === "user" ? "You" : "HERmes";
+  const speaker = message.role === "user" ? "You" : "Approved Mind Mirror";
   const content = message.role === "hermes" ? stripMemoriesUsedSection(message.content) : message.content;
   const sources =
     message.role === "hermes"
@@ -1571,7 +1571,7 @@ const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
 if (import.meta.url === invokedPath) {
   startUiServer(runtimeFromEnvironment())
     .then(({ url }) => {
-      process.stdout.write(`HERmes Local Web Chat: ${url}\n`);
+      process.stdout.write(`Approved Mind Mirror Local Web Chat: ${url}\n`);
       process.stdout.write("Local-only. Only approved memories are used for chat/list/search/reflect.\n");
     })
     .catch((error: unknown) => {

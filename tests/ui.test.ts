@@ -57,8 +57,9 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("HERmes");
-    expect(html).toContain("Just start chatting. HERmes will suggest memories when something seems worth saving.");
+    expect(html).toContain("<h1>Approved Mind Mirror</h1>");
+    expect(html).toContain("Just start chatting. Approved Mind Mirror will suggest memories when something seems worth saving.");
+    expect(html).not.toContain("HERmes");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
   });
 
@@ -89,7 +90,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it.");
     expect(html).not.toContain("No chat messages yet.");
     expect(html).not.toContain("Started a new local chat session.");
-    expect(html).toContain('placeholder="Message HERmes…"');
+    expect(html).toContain('placeholder="Message…"');
   });
 
   it("keeps database and internal language off the default chat page", async () => {
@@ -284,7 +285,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(reflectOnApprovedMemory("What about cobalt?", runtime(root)).relevantMemoryIds).toEqual([]);
   });
 
-  it("chat endpoint returns a HERmes response and persists messages", async () => {
+  it("chat endpoint returns an assistant response and persists messages", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     const [draft] = intakeText("Seedance storyboard ideas should stay small and inspectable.", runtime(root));
@@ -298,7 +299,7 @@ describe("HERmes Local Web Chat UI", () => {
     const [session] = listChatSessions(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(html).toContain("HERmes");
+    expect(html).toContain("Approved Mind Mirror");
     expect(html).toContain("Sources from your memory");
     expect(html).toContain(`[${memory.id}]`);
     expect(html).toContain("Seedance storyboard ideas");

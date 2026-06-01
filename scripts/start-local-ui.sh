@@ -8,10 +8,10 @@ HOST="${HERMES_UI_HOST:-127.0.0.1}"
 PORT="${HERMES_UI_PORT:-8787}"
 URL="http://${HOST}:${PORT}"
 
-echo "Building HERmes local UI..."
+echo "Building Approved Mind Mirror local UI..."
 npm run build
 
-echo "Starting HERmes Local Web Chat at ${URL}"
+echo "Starting Approved Mind Mirror Local Web Chat at ${URL}"
 echo "Local-only. Press Control-C in this terminal to stop the server."
 
 if command -v open >/dev/null 2>&1; then
