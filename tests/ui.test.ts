@@ -58,7 +58,7 @@ describe("HERmes Local Web Chat UI", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("HERmes");
-    expect(html).toContain("HERmes works best after you add and approve a few memories.");
+    expect(html).toContain("Just talk naturally. I'll suggest memories when something seems worth saving.");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
   });
 
@@ -245,6 +245,118 @@ describe("HERmes Local Web Chat UI", () => {
       "user",
       "hermes"
     ]);
+  });
+
+  it("chat endpoint shows organic memory suggestions for durable statements", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/chat/send", {
+        message: "I prefer project notes that end with one tiny artifact I can inspect."
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("This may be worth remembering.");
+    expect(html).toContain("Proposed memory");
+    expect(html).toContain("Save as draft");
+    expect(html).toContain("Dismiss");
+    expect(html).toContain("I prefer project notes");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("direct remember requests create a pending draft only through chat", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/chat/send", {
+        message: "remember that I love quiet local tools that ask before memory becomes official."
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const pendingDrafts = listPendingDrafts(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Saved as a draft. Review and approve it before it becomes memory.");
+    expect(pendingDrafts).toHaveLength(1);
+    expect(pendingDrafts[0]?.status).toBe("pending");
+    expect(pendingDrafts[0]?.source_type).toBe("chat");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("saving an organic suggestion creates a pending draft only", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(
+      formRequest("/chat/send", {
+        message: "My goal is to capture durable preferences without making HERmes an agent."
+      }),
+      runtime(root)
+    );
+    const [session] = listChatSessions(runtime(root));
+    const [userMessage] = listChatMessages(session.id, runtime(root));
+
+    const page = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await page.text();
+    const suggestionKey = html.match(/name="suggestionKey" value="([^"]+)"/)?.[1];
+    expect(suggestionKey).toBeDefined();
+
+    const response = await handleUiRequest(
+      formRequest("/memory-suggestions/save", {
+        sessionId: String(session.id),
+        messageId: String(userMessage.id),
+        suggestionKey: suggestionKey ?? "",
+        proposedContent: "My goal is to capture durable preferences without making HERmes an agent."
+      }),
+      runtime(root)
+    );
+    const savedHtml = await response.text();
+    const pendingDrafts = listPendingDrafts(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(savedHtml).toContain("Created pending draft");
+    expect(savedHtml).not.toContain("This may be worth remembering.");
+    expect(pendingDrafts).toHaveLength(1);
+    expect(pendingDrafts[0]?.status).toBe("pending");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("dismissing an organic suggestion hides it for that message", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(
+      formRequest("/chat/send", {
+        message: "Going forward, I want HERmes memory prompts to stay small and optional."
+      }),
+      runtime(root)
+    );
+    const [session] = listChatSessions(runtime(root));
+    const [userMessage] = listChatMessages(session.id, runtime(root));
+    const page = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await page.text();
+    const suggestionKey = html.match(/name="suggestionKey" value="([^"]+)"/)?.[1];
+    expect(suggestionKey).toBeDefined();
+
+    const response = await handleUiRequest(
+      formRequest("/memory-suggestions/dismiss", {
+        sessionId: String(session.id),
+        messageId: String(userMessage.id),
+        suggestionKey: suggestionKey ?? ""
+      }),
+      runtime(root)
+    );
+    const dismissedHtml = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(dismissedHtml).toContain("Memory suggestion dismissed.");
+    expect(dismissedHtml).not.toContain("This may be worth remembering.");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
   });
 
   it("chat save-draft creates a pending draft only", async () => {

@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { openDatabase, tableExists, TABLES } from "./db.js";
+import { createDraftProposalFromText } from "./draftGeneration.js";
 import { createDraftFromText, retrieveRelevantApprovedMemories } from "./hermes.js";
 import type {
   ChatMessage,
@@ -8,12 +10,44 @@ import type {
   ChatTurn,
   HermesRuntimeOptions,
   IdeaCandidate,
+  MemorySuggestion,
   MemoryDraft,
   SearchResult
 } from "./types.js";
 
 const IDEA_PROMPT_RE =
   /\b(ideas?|possibilit(?:y|ies)|directions?|creative sparks?|project ideas?|content ideas?)\b|what does this make you think of/i;
+
+const DIRECT_MEMORY_REQUEST_RE =
+  /^(?:please\s+)?(?:remember(?:\s+that)?|save\s+this|save\s+that|add\s+(?:this|that)\s+to\s+memory|add\s+to\s+memory)\s*[:,-]?\s*(.+)$/i;
+
+const MEMORY_SIGNAL_PATTERNS = [
+  /\bi want\b/i,
+  /\bi prefer\b/i,
+  /\bi don['’]?t want\b/i,
+  /\bgoing forward\b/i,
+  /\bremember\b/i,
+  /\bi['’]?m moving toward\b/i,
+  /\bthis is the direction\b/i,
+  /\bi['’]?m working on\b/i,
+  /\bi decided\b/i,
+  /\bi learned\b/i,
+  /\bi keep coming back to\b/i,
+  /\bthe problem is\b/i,
+  /\bwhat matters to me is\b/i,
+  /\bi['’]?m trying to\b/i,
+  /\bmy goal is\b/i,
+  /\bi (?:hate|love|prefer|dislike)\b/i,
+  /\b(?:project|workflow|process|system|ritual|routine)\b.+\b(?:should|needs?|works?|uses?|depends?|matters?)\b/i,
+  /\b(?:design|product|architecture|implementation) decision\b/i,
+  /\b(?:settled|decided) (?:direction|decision|approach)\b/i
+] as const;
+
+const GREETING_OR_TINY_RE = /^(?:hi|hello|hey|thanks|thank you|ok|okay|cool|nice|yes|no|yo)\b[!. ]*$/i;
+const TEMPORARY_RE =
+  /\b(?:today|tonight|tomorrow|this morning|this afternoon|this evening|right now|for now|temporary|just testing|test message)\b/i;
+const SYSTEMISH_RE =
+  /\b(?:stack trace|debug log|sqlite error|database path|table names?|npm run|node_modules|localhost|127\.0\.0\.1)\b/i;
 
 const CHAT_STOPWORDS = new Set([
   "about",
@@ -91,6 +125,7 @@ export function sendChatMessage(
   const memoryIds = memoriesUsed.map(({ memory }) => memory.id);
 
   const db = openExistingChatDb(options);
+  let persistedTurn!: ChatTurn;
   try {
     const insert = db.transaction(() => {
       const session = options.sessionId
@@ -120,10 +155,28 @@ export function sendChatMessage(
       };
     });
 
-    return insert();
+    persistedTurn = insert();
   } finally {
     db.close();
   }
+
+  const directMemoryText = extractDirectMemoryRequest(normalized);
+  if (directMemoryText) {
+    const savedDraft = createDraftFromText(
+      directMemoryText,
+      "chat",
+      memorySuggestionSourceLabel(persistedTurn.session.id, persistedTurn.userMessage.id),
+      options
+    );
+    return { ...persistedTurn, savedDraft };
+  }
+
+  const memorySuggestion = suggestMemoryFromUserMessage(normalized, {
+    sessionId: persistedTurn.session.id,
+    messageId: persistedTurn.userMessage.id
+  });
+
+  return memorySuggestion ? { ...persistedTurn, memorySuggestion } : persistedTurn;
 }
 
 export function createChatResponse(userInput: string, memoriesUsed: SearchResult[]): ChatResponse {
@@ -207,6 +260,106 @@ export function saveLatestChatExchangeDraft(
     hermesMessage.content
   ].join("\n");
   return createDraftFromText(draftContent, "chat", `chat_session:${sessionId}`, options);
+}
+
+export function suggestMemoryFromUserMessage(
+  userInput: string,
+  context: { sessionId?: number; messageId?: number } = {}
+): MemorySuggestion | undefined {
+  const normalized = normalizeUserMemoryText(userInput);
+  if (!normalized || extractDirectMemoryRequest(normalized)) {
+    return undefined;
+  }
+
+  const candidate = extractDurableMemoryCandidate(normalized);
+  if (!candidate) {
+    return undefined;
+  }
+
+  return createMemorySuggestion(candidate, context);
+}
+
+export function getLatestMemorySuggestion(
+  sessionId: number,
+  options: HermesRuntimeOptions = {}
+): MemorySuggestion | undefined {
+  const db = openExistingChatDb(options);
+  try {
+    const latestUserMessage = db
+      .prepare("SELECT * FROM chat_messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1")
+      .get(sessionId) as ChatMessage | undefined;
+    if (!latestUserMessage) {
+      return undefined;
+    }
+
+    const suggestion = suggestMemoryFromUserMessage(latestUserMessage.content, {
+      sessionId,
+      messageId: latestUserMessage.id
+    });
+    if (!suggestion || isSuggestionDismissed(db, sessionId, latestUserMessage.id, suggestion.suggestionKey)) {
+      return undefined;
+    }
+
+    return suggestion;
+  } finally {
+    db.close();
+  }
+}
+
+export function saveSuggestedMemoryDraft(
+  suggestion: {
+    proposedContent: string;
+    sourceSessionId: number;
+    sourceMessageId: number;
+    suggestionKey: string;
+  },
+  options: HermesRuntimeOptions = {}
+): MemoryDraft {
+  const content = normalizeUserMemoryText(suggestion.proposedContent);
+  if (!content) {
+    throw new Error("Suggested memory text is required.");
+  }
+
+  assertUserChatMessageExists(suggestion.sourceSessionId, suggestion.sourceMessageId, options);
+  const draft = createDraftFromText(
+    content,
+    "chat",
+    memorySuggestionSourceLabel(suggestion.sourceSessionId, suggestion.sourceMessageId),
+    options
+  );
+  dismissMemorySuggestion(
+    suggestion.sourceSessionId,
+    suggestion.sourceMessageId,
+    suggestion.suggestionKey,
+    options
+  );
+  return draft;
+}
+
+export function dismissMemorySuggestion(
+  sessionId: number,
+  messageId: number,
+  suggestionKey: string,
+  options: HermesRuntimeOptions = {}
+): void {
+  const normalizedKey = suggestionKey.trim();
+  if (!normalizedKey) {
+    throw new Error("Suggestion key is required.");
+  }
+
+  const db = openExistingChatDb(options);
+  try {
+    db.prepare(
+      `INSERT OR IGNORE INTO memory_suggestion_dismissals (
+        created_at,
+        session_id,
+        message_id,
+        suggestion_key
+      ) VALUES (?, ?, ?, ?)`
+    ).run(nowIso(), sessionId, messageId, normalizedKey);
+  } finally {
+    db.close();
+  }
 }
 
 export function listChatMessages(
@@ -303,6 +456,114 @@ function buildIdeaCandidates(userInput: string, memoriesUsed: SearchResult[]): I
   }
 
   return candidates;
+}
+
+function extractDirectMemoryRequest(userInput: string): string | undefined {
+  const match = normalizeUserMemoryText(userInput).match(DIRECT_MEMORY_REQUEST_RE);
+  const content = match?.[1]?.trim();
+  return content ? content : undefined;
+}
+
+function extractDurableMemoryCandidate(userInput: string): string | undefined {
+  const normalized = normalizeUserMemoryText(userInput);
+  if (!normalized || normalized.startsWith("/") || GREETING_OR_TINY_RE.test(normalized)) {
+    return undefined;
+  }
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length < 5 || normalized.length < 24) {
+    return undefined;
+  }
+
+  if (TEMPORARY_RE.test(normalized) || SYSTEMISH_RE.test(normalized)) {
+    return undefined;
+  }
+
+  const durableSentence = normalized
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .find((sentence) => MEMORY_SIGNAL_PATTERNS.some((pattern) => pattern.test(sentence)));
+
+  if (!durableSentence) {
+    return undefined;
+  }
+
+  return stripTrailingCommandTone(durableSentence);
+}
+
+function createMemorySuggestion(
+  proposedContent: string,
+  context: { sessionId?: number; messageId?: number }
+): MemorySuggestion {
+  const proposal = createDraftProposalFromText(
+    proposedContent,
+    "chat",
+    context.sessionId && context.messageId
+      ? memorySuggestionSourceLabel(context.sessionId, context.messageId)
+      : "chat_session:pending"
+  );
+
+  return {
+    proposedContent: proposal.proposed_content,
+    suggestedCategory: proposal.proposed_category,
+    suggestedTags: parseTags(proposal.proposed_tags_json),
+    sourceType: "chat",
+    sourceLabel: proposal.source_label,
+    sourceSessionId: context.sessionId ?? null,
+    sourceMessageId: context.messageId ?? null,
+    suggestionKey: makeSuggestionKey(proposal.proposed_content)
+  };
+}
+
+function memorySuggestionSourceLabel(sessionId: number, messageId: number): string {
+  return `chat_session:${sessionId}:message:${messageId}`;
+}
+
+function makeSuggestionKey(content: string): string {
+  const normalized = normalizeUserMemoryText(content).toLowerCase();
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+}
+
+function isSuggestionDismissed(
+  db: Database.Database,
+  sessionId: number,
+  messageId: number,
+  suggestionKey: string
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT id FROM memory_suggestion_dismissals
+       WHERE session_id = ? AND message_id = ? AND suggestion_key = ?
+       LIMIT 1`
+    )
+    .get(sessionId, messageId, suggestionKey);
+  return Boolean(row);
+}
+
+function assertUserChatMessageExists(
+  sessionId: number,
+  messageId: number,
+  options: HermesRuntimeOptions
+): void {
+  const db = openExistingChatDb(options);
+  try {
+    const row = db
+      .prepare("SELECT id FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'")
+      .get(messageId, sessionId);
+    if (!row) {
+      throw new Error(`Chat message ${messageId} was not found in session ${sessionId}.`);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function normalizeUserMemoryText(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
+}
+
+function stripTrailingCommandTone(text: string): string {
+  return text.replace(/\s+(?:please|thanks)\.?$/i, "").trim();
 }
 
 function insertChatSession(db: Database.Database, title: string | null): ChatSession {

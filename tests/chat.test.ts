@@ -4,9 +4,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createChatResponse,
+  dismissMemorySuggestion,
+  getLatestMemorySuggestion,
   listChatMessages,
   listChatSessions,
   saveLatestChatExchangeDraft,
+  saveSuggestedMemoryDraft,
+  suggestMemoryFromUserMessage,
   sendChatMessage
 } from "../src/chat.js";
 import { createProgram } from "../src/cli.js";
@@ -122,6 +126,98 @@ describe("HERmes v0.2 chat", () => {
     expect(messages.map((message) => message.role)).toEqual(["user", "hermes"]);
     expect(messages[0]?.content).toBe("Mirror the Seedance storyboard note.");
     expect(JSON.parse(messages[1]?.memory_ids_json ?? "[]")).toEqual([memoryId]);
+  });
+
+  it("suggests a draft for durable user statements", () => {
+    const suggestion = suggestMemoryFromUserMessage(
+      "I prefer quiet project planning notes that end with one smallest next artifact."
+    );
+
+    expect(suggestion?.proposedContent).toContain("I prefer quiet project planning notes");
+    expect(suggestion?.suggestedCategory).toBe("preference");
+    expect(suggestion?.suggestionKey).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  it("does not suggest memory for vague or temporary messages", () => {
+    expect(suggestMemoryFromUserMessage("hello")).toBeUndefined();
+    expect(suggestMemoryFromUserMessage("I want pizza tonight.")).toBeUndefined();
+    expect(suggestMemoryFromUserMessage("/save-draft")).toBeUndefined();
+  });
+
+  it("direct remember requests create pending drafts only", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const turn = sendChatMessage(
+      "remember that I prefer deterministic memory mirrors over automation agents.",
+      runtime(root)
+    );
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(turn.savedDraft?.status).toBe("pending");
+    expect(turn.savedDraft?.source_label).toBe(`chat_session:${turn.session.id}:message:${turn.userMessage.id}`);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.proposed_content).toBe("I prefer deterministic memory mirrors over automation agents.");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("saved organic suggestions remain pending until explicit approval", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const turn = sendChatMessage(
+      "My goal is to make HERmes feel like a natural conversation partner before adding intelligence.",
+      runtime(root)
+    );
+
+    expect(turn.memorySuggestion).toBeDefined();
+    const draft = saveSuggestedMemoryDraft(
+      {
+        proposedContent: "My goal is to make HERmes feel conversational before adding intelligence.",
+        sourceSessionId: turn.session.id,
+        sourceMessageId: turn.userMessage.id,
+        suggestionKey: turn.memorySuggestion?.suggestionKey ?? ""
+      },
+      runtime(root)
+    );
+
+    expect(draft.status).toBe("pending");
+    expect(draft.source_type).toBe("chat");
+    expect(draft.source_label).toBe(`chat_session:${turn.session.id}:message:${turn.userMessage.id}`);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(1);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("dismissed suggestions do not reappear for the same message", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const turn = sendChatMessage(
+      "Going forward, HERmes should suggest memory lightly without interrupting chat.",
+      runtime(root)
+    );
+    const suggestion = getLatestMemorySuggestion(turn.session.id, runtime(root));
+
+    expect(suggestion).toBeDefined();
+    dismissMemorySuggestion(
+      turn.session.id,
+      turn.userMessage.id,
+      suggestion?.suggestionKey ?? "",
+      runtime(root)
+    );
+
+    expect(getLatestMemorySuggestion(turn.session.id, runtime(root))).toBeUndefined();
+  });
+
+  it("chat still works with zero approved memories", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const turn = sendChatMessage("What does this make you think of for a tiny local app?", runtime(root));
+
+    expect(turn.response.mode).toBe("idea");
+    expect(turn.response.memoriesUsed).toHaveLength(0);
+    expect(turn.hermesMessage.content).toContain("these ideas come only from your current message");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listChatMessages(turn.session.id, runtime(root))).toHaveLength(2);
   });
 
   it("can generate a deterministic response without persistence", () => {

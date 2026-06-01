@@ -8,7 +8,8 @@ export const TABLES = [
   "memory_drafts",
   "memory_events",
   "chat_sessions",
-  "chat_messages"
+  "chat_messages",
+  "memory_suggestion_dismissals"
 ] as const;
 
 const DB_FILE_RE = /^[A-Za-z0-9._-]+\.db$/;
@@ -106,12 +107,22 @@ export function initializeSchema(db: Database.Database): void {
       memory_ids_json TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS memory_suggestion_dismissals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+      suggestion_key TEXT NOT NULL,
+      UNIQUE(session_id, message_id, suggestion_key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_memory_entries_status ON memory_entries(status);
     CREATE INDEX IF NOT EXISTS idx_memory_entries_source ON memory_entries(source_type, source_label);
     CREATE INDEX IF NOT EXISTS idx_memory_drafts_status ON memory_drafts(status);
     CREATE INDEX IF NOT EXISTS idx_memory_events_memory_id ON memory_events(memory_id);
     CREATE INDEX IF NOT EXISTS idx_memory_events_draft_id ON memory_events(draft_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id, id);
+    CREATE INDEX IF NOT EXISTS idx_memory_suggestion_dismissals_message ON memory_suggestion_dismissals(session_id, message_id);
   `);
 }
 

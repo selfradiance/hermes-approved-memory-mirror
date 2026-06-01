@@ -3,9 +3,12 @@ import http, { type IncomingMessage, type Server, type ServerResponse } from "no
 import { pathToFileURL } from "node:url";
 import {
   createChatSession,
+  dismissMemorySuggestion,
+  getLatestMemorySuggestion,
   listChatMessages,
   listChatSessions,
   saveLatestChatExchangeDraft,
+  saveSuggestedMemoryDraft,
   sendChatMessage
 } from "./chat.js";
 import {
@@ -28,6 +31,7 @@ import type {
   HermesRuntimeOptions,
   MemoryDraft,
   MemoryEntry,
+  MemorySuggestion,
   ReflectionReport,
   SearchResult
 } from "./types.js";
@@ -46,6 +50,7 @@ interface RenderState {
   notice?: Notice;
   activeSessionId?: number;
   chatTurn?: ChatTurn;
+  memorySuggestion?: MemorySuggestion;
   searchQuery?: string;
   searchResults?: SearchResult[];
   reflection?: ReflectionReport;
@@ -98,7 +103,18 @@ export async function handleUiRequest(
       const message = requiredFormValue(form, "message", "Chat message is required.");
       const sessionId = parseOptionalPositiveInteger(form.get("sessionId") ?? "");
       const chatTurn = sendChatMessage(message, { ...runtime, sessionId });
-      return htmlResponse(renderPage(runtime, { activeSessionId: chatTurn.session.id, chatTurn }));
+      return htmlResponse(
+        renderPage(runtime, {
+          activeSessionId: chatTurn.session.id,
+          chatTurn,
+          notice: chatTurn.savedDraft
+            ? {
+                kind: "success",
+                message: "Saved as a draft. Review and approve it before it becomes memory."
+              }
+            : undefined
+        })
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/chat/save-draft") {
@@ -122,6 +138,53 @@ export async function handleUiRequest(
         renderPage(runtime, {
           activeSessionId: session.id,
           notice: { kind: "info", message: "Started a new local chat session." }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/memory-suggestions/save") {
+      const form = await readForm(request);
+      const sessionId = parsePositiveInteger(
+        requiredFormValue(form, "sessionId", "Chat session id is required."),
+        "Chat session id"
+      );
+      const messageId = parsePositiveInteger(
+        requiredFormValue(form, "messageId", "Chat message id is required."),
+        "Chat message id"
+      );
+      const suggestionKey = requiredFormValue(form, "suggestionKey", "Suggestion key is required.");
+      const proposedContent = requiredFormValue(form, "proposedContent", "Suggested memory text is required.");
+      const draft = saveSuggestedMemoryDraft(
+        { proposedContent, sourceSessionId: sessionId, sourceMessageId: messageId, suggestionKey },
+        runtime
+      );
+      return htmlResponse(
+        renderPage(runtime, {
+          activeSessionId: sessionId,
+          notice: {
+            kind: "success",
+            message: `Created pending draft ${draft.id}. Review and approve it before it becomes memory.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/memory-suggestions/dismiss") {
+      const form = await readForm(request);
+      const sessionId = parsePositiveInteger(
+        requiredFormValue(form, "sessionId", "Chat session id is required."),
+        "Chat session id"
+      );
+      const messageId = parsePositiveInteger(
+        requiredFormValue(form, "messageId", "Chat message id is required."),
+        "Chat message id"
+      );
+      const suggestionKey = requiredFormValue(form, "suggestionKey", "Suggestion key is required.");
+      dismissMemorySuggestion(sessionId, messageId, suggestionKey, runtime);
+      return htmlResponse(
+        renderPage(runtime, {
+          activeSessionId: sessionId,
+          notice: { kind: "info", message: "Memory suggestion dismissed." }
         })
       );
     }
@@ -521,6 +584,33 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
     .memory-sources ul {
       padding-left: 18px;
     }
+    .memory-suggestion {
+      display: grid;
+      gap: 10px;
+      border: 1px solid #e3d3aa;
+      background: #fffaf0;
+      border-radius: 8px;
+      padding: 13px;
+    }
+    .memory-suggestion h3 {
+      margin: 0;
+      font-size: 0.98rem;
+      letter-spacing: 0;
+    }
+    .memory-suggestion textarea {
+      min-height: 84px;
+    }
+    .suggestion-meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0;
+    }
+    .suggestion-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
     .chat-compose {
       display: grid;
       gap: 10px;
@@ -607,7 +697,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       ${
         model.approvedMemories.length === 0
           ? `<div class="onboarding">
-              <p>HERmes works best after you add and approve a few memories.</p>
+              <p>Just talk naturally. I'll suggest memories when something seems worth saving.</p>
               <a class="link-button" href="#add-memory">Add memory</a>
             </div>`
           : ""
@@ -931,6 +1021,10 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     : latestHermesMessage
       ? memorySourcesForMessage(latestHermesMessage, approvedMemories)
       : [];
+  const latestMemorySuggestion =
+    state.memorySuggestion ??
+    state.chatTurn?.memorySuggestion ??
+    (canReadMemory && activeSessionId ? getLatestMemorySuggestion(activeSessionId, runtime) : undefined);
   const searchQuery = state.searchQuery ?? "";
 
   return {
@@ -943,6 +1037,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     chatMessages,
     latestHermesMessage,
     latestMemorySources,
+    latestMemorySuggestion,
     searchQuery,
     searchResults: state.searchResults
   };
@@ -962,6 +1057,8 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
           : `<p class="empty">No chat messages yet. Start with an idea, question, or "what does this make you think of?"</p>`
       }
     </div>
+
+    ${model.latestMemorySuggestion ? renderMemorySuggestion(model.latestMemorySuggestion) : ""}
 
     <form class="chat-compose" method="post" action="/chat/send">
       ${sessionInput}
@@ -1016,6 +1113,42 @@ function renderLatestMemorySources(
     return `<div class="memory-sources"><p>Sources from your memory: none yet.</p></div>`;
   }
   return renderMemorySources(sources, "No approved memories were used for the latest response.");
+}
+
+function renderMemorySuggestion(suggestion: MemorySuggestion): string {
+  const sourceReady = suggestion.sourceSessionId !== null && suggestion.sourceMessageId !== null;
+  const hiddenFields = sourceReady
+    ? [
+        `<input type="hidden" name="sessionId" value="${suggestion.sourceSessionId}">`,
+        `<input type="hidden" name="messageId" value="${suggestion.sourceMessageId}">`,
+        `<input type="hidden" name="suggestionKey" value="${escapeAttribute(suggestion.suggestionKey)}">`
+      ].join("")
+    : "";
+  const tags = suggestion.suggestedTags.length > 0 ? suggestion.suggestedTags.join(", ") : "none";
+
+  return `<section class="memory-suggestion" aria-label="Memory suggestion">
+    <div>
+      <h3>This may be worth remembering.</h3>
+      <p class="suggestion-meta">Suggested as ${escapeHtml(
+        suggestion.suggestedCategory
+      )} · Tags: ${escapeHtml(tags)} · Source: current chat message</p>
+    </div>
+    <form class="stack" method="post" action="/memory-suggestions/save">
+      ${hiddenFields}
+      <label>
+        Proposed memory
+        <textarea name="proposedContent" required>${escapeHtml(suggestion.proposedContent)}</textarea>
+      </label>
+      <div class="suggestion-actions">
+        <button type="submit"${sourceReady ? "" : " disabled"}>Save as draft</button>
+        <button class="secondary" type="button" onclick="this.closest('form').querySelector('textarea').focus()">Edit</button>
+      </div>
+    </form>
+    <form method="post" action="/memory-suggestions/dismiss">
+      ${hiddenFields}
+      <button class="secondary" type="submit"${sourceReady ? "" : " disabled"}>Dismiss</button>
+    </form>
+  </section>`;
 }
 
 function renderMemorySources(sources: UiMemorySource[], emptyText: string): string {
@@ -1213,11 +1346,7 @@ function requiredFormValue(form: URLSearchParams, key: string, message: string):
 }
 
 function parseDraftId(value: string): number {
-  const draftId = Number.parseInt(value, 10);
-  if (!Number.isInteger(draftId) || draftId <= 0) {
-    throw new Error("Draft id must be a positive integer.");
-  }
-  return draftId;
+  return parsePositiveInteger(value, "Draft id");
 }
 
 function parseOptionalPositiveInteger(value: string): number | undefined {
@@ -1225,7 +1354,15 @@ function parseOptionalPositiveInteger(value: string): number | undefined {
   if (!trimmed) {
     return undefined;
   }
-  return parseDraftId(trimmed);
+  return parsePositiveInteger(trimmed, "Value");
+}
+
+function parsePositiveInteger(value: string, label: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return parsed;
 }
 
 function formatTags(tagsJson: string): string {

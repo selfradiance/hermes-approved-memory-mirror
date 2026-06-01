@@ -49,6 +49,7 @@ describe("HERmes v0.1", () => {
     expect(report.tables.memory_events).toBe(true);
     expect(report.tables.chat_sessions).toBe(true);
     expect(report.tables.chat_messages).toBe(true);
+    expect(report.tables.memory_suggestion_dismissals).toBe(true);
   });
 
   it("intake creates pending draft, not approved memory", () => {

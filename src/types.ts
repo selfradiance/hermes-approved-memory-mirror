@@ -72,6 +72,17 @@ export interface ChatMessage {
   memory_ids_json: string;
 }
 
+export interface MemorySuggestion {
+  proposedContent: string;
+  suggestedCategory: string;
+  suggestedTags: string[];
+  sourceType: "chat";
+  sourceLabel: string;
+  sourceSessionId: number | null;
+  sourceMessageId: number | null;
+  suggestionKey: string;
+}
+
 export interface SearchResult {
   memory: MemoryEntry;
   snippet: string;
@@ -96,6 +107,8 @@ export interface ChatTurn {
   userMessage: ChatMessage;
   hermesMessage: ChatMessage;
   response: ChatResponse;
+  memorySuggestion?: MemorySuggestion;
+  savedDraft?: MemoryDraft;
 }
 
 export interface ReflectionReport {

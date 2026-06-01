@@ -1,6 +1,6 @@
 {
   "name": "hermes-approved-memory-mirror",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A safe local approved-memory mirror CLI for James.",
   "type": "module",
   "bin": {

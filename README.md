@@ -2,7 +2,7 @@
 
 HERmes is a tiny local TypeScript/Node memory mirror for James. Its primary interface is a localhost-only web chat UI for conversational reflection, idea mirroring, memory draft review, approved-memory search, and JSON export. The CLI remains available for advanced use.
 
-HERmes stores only human-approved memories. Intake creates drafts. Drafts are not memory.
+HERmes stores only human-approved memories. Intake and chat can propose drafts. Drafts are not memory until you approve them.
 
 ## What It Is Not
 
@@ -71,14 +71,16 @@ In the UI:
 
 1. Chat with HERmes in the browser.
 2. See HERmes responses and the approved memories used.
-3. Save the latest exchange as a pending draft.
-4. Review pending drafts and approve or reject them.
-5. Add notes as pending drafts.
-6. Open `System` only when you want diagnostics, search, deterministic reflection, or local JSON export.
+3. Let HERmes suggest possible memories when something in chat sounds durable.
+4. Edit, save, or dismiss memory suggestions.
+5. Save the latest exchange as a pending draft.
+6. Review pending drafts and approve or reject them.
+7. Add notes as pending drafts.
+8. Open `System` only when you want diagnostics, search, deterministic reflection, or local JSON export.
 
-Only approved memories are used for chat/list/search/reflect. Saving a chat exchange creates a pending draft only; it does not approve memory.
+Only approved memories are used for chat/list/search/reflect. Saving a chat exchange or suggestion creates a pending draft only; it does not approve memory.
 
-HERmes initializes its local memory store automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics.
+HERmes initializes its local memory store automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics. If you have no approved memories yet, just talk naturally; HERmes will suggest memories when something seems worth saving.
 
 What the UI cannot do:
 
@@ -89,6 +91,30 @@ What the UI cannot do:
 - No automatic approved-memory writes.
 - No filesystem crawl; file intake still reads one explicitly supplied file only.
 - No writes outside `.hermes/`, except existing explicit export under `.hermes/export/`.
+
+## Organic Memory Capture
+
+HERmes v0.2.3 notices simple durable statements in chat with deterministic rules. Examples include "I prefer...", "My goal is...", "Going forward...", "I'm working on...", "I decided...", and "What matters to me is...".
+
+When a candidate appears, the UI shows a small card:
+
+```text
+This may be worth remembering.
+Proposed memory: I prefer project notes that end with one tiny artifact.
+Suggested as: preference
+Source: current chat message
+[Save as draft] [Edit] [Dismiss]
+```
+
+If you say "remember that...", "save this...", or "add this to memory...", HERmes creates a pending draft immediately and tells you to review it. It still does not create approved memory. Approval remains explicit through the review flow.
+
+Flow:
+
+```text
+chat message -> memory suggestion -> pending draft -> approval -> approved memory
+```
+
+The detector is local and rule-based. It does not call an LLM/API, does not browse, and does not take external actions.
 
 ## Advanced CLI Commands
 
@@ -175,9 +201,11 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 `chat_sessions` and `chat_messages` store local web and terminal chat history. HERmes messages record the approved memory IDs used for each response.
 
+`memory_suggestion_dismissals` stores local dismissal markers so an ignored organic suggestion does not keep reappearing for the same chat message.
+
 ## Human Approval Flow
 
-1. `intake` creates one or more pending drafts.
+1. `intake`, chat suggestions, direct "remember that..." requests, and chat save create pending drafts.
 2. `review` shows pending drafts.
 3. `approve <draft-id>` writes an approved memory entry and audit events.
 4. `reject <draft-id>` marks a draft rejected and writes an audit event.

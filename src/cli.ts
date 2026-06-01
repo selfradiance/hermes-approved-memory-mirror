@@ -47,7 +47,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.2.2");
+    .version("0.2.3");
 
   program
     .command("init")
@@ -214,6 +214,17 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
       latestTurn = sendChatMessage(line, { ...runtime, sessionId: session.id });
       session = latestTurn.session;
       out(`HERmes:\n${latestTurn.hermesMessage.content}`);
+      if (latestTurn.savedDraft) {
+        out("Saved as a draft. Review and approve it before it becomes memory.");
+      } else if (latestTurn.memorySuggestion) {
+        out(
+          [
+            "This may be worth remembering:",
+            latestTurn.memorySuggestion.proposedContent,
+            "Use the local web UI to edit, save, or dismiss this suggestion."
+          ].join("\n")
+        );
+      }
       rl.prompt();
     }
   } finally {
