@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { listChatMessages, listChatSessions } from "../src/chat.js";
 import {
   approveDraft,
   initHermes,
@@ -189,6 +190,54 @@ describe("HERmes Local Review UI", () => {
     expect(await rejectedSearch.text()).toContain('No approved memories matched "cobalt".');
     expect(await rejectedReflection.text()).toContain("No approved local memories matched this question.");
     expect(reflectOnApprovedMemory("What about cobalt?", runtime(root)).relevantMemoryIds).toEqual([]);
+  });
+
+  it("chat endpoint returns a HERmes response and persists messages", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Seedance storyboard ideas should stay small and inspectable.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/chat/send", { message: "What ideas fit the Seedance storyboard?" }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const [session] = listChatSessions(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("HERmes");
+    expect(html).toContain("Memories used:");
+    expect(html).toContain(`[${memory.id}]`);
+    expect(html).toContain("Seedance storyboard ideas");
+    expect(session).toBeDefined();
+    expect(listChatMessages(session.id, runtime(root)).map((message) => message.role)).toEqual([
+      "user",
+      "hermes"
+    ]);
+  });
+
+  it("chat save-draft creates a pending draft only", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Approved amber chat memory.", runtime(root));
+    approveDraft(draft.id, runtime(root));
+    await handleUiRequest(formRequest("/chat/send", { message: "Reflect on amber chat." }), runtime(root));
+    const [session] = listChatSessions(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/chat/save-draft", { sessionId: String(session.id) }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const pendingDrafts = listPendingDrafts(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Created pending draft");
+    expect(pendingDrafts).toHaveLength(1);
+    expect(pendingDrafts[0]?.status).toBe("pending");
+    expect(pendingDrafts[0]?.source_type).toBe("chat");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(1);
   });
 
   it("UI export writes JSON under .hermes/export", async () => {

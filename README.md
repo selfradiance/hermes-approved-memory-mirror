@@ -1,6 +1,6 @@
 # HERmes — Approved Memory Mirror
 
-HERmes is a tiny local TypeScript/Node memory mirror for James. It has a CLI, a terminal chat mirror, and a localhost-only Local Review UI for adding notes, reviewing proposed memory drafts, approving or rejecting them, searching approved memory, and generating deterministic reflection output from approved memory.
+HERmes is a tiny local TypeScript/Node memory mirror for James. Its primary interface is a localhost-only web chat UI for conversational reflection, idea mirroring, memory draft review, approved-memory search, and JSON export. The CLI remains available for advanced use.
 
 HERmes stores only human-approved memories. Intake creates drafts. Drafts are not memory.
 
@@ -10,7 +10,7 @@ HERmes is not an autonomous agent. It does not act on the outside world, execute
 
 ## Safety Boundaries
 
-- Local CLI plus localhost-only Local Review UI; no public web app or cloud service.
+- Local CLI plus localhost-only web UI; no public web app or cloud service.
 - SQLite only; runtime data stays under `.hermes/`.
 - No external connectors, MCP, browser automation, background daemon, scheduler, subagents, telemetry, analytics, or external network calls.
 - No email, calendar, contacts, messaging, social, banking, exchange, wallet, GitHub, or YouTube access.
@@ -38,35 +38,59 @@ After building:
 node dist/cli.js doctor
 ```
 
-## Local Review UI
+## Local Web Chat UI
 
-To use HERmes without memorizing terminal commands:
+To use HERmes conversationally in a browser:
+
+```bash
+./scripts/start-local-ui.sh
+```
+
+On macOS, you can also double-click:
+
+```text
+HERmes.command
+```
+
+The launcher builds the app, starts the local UI, prints the URL, and asks macOS to open it. The default local URL is:
+
+```text
+http://127.0.0.1:8787
+```
+
+During development you can also run:
 
 ```bash
 npm install
 npm run ui
 ```
 
-Open the local URL printed in the terminal, usually:
-
-```text
-http://127.0.0.1:8787
-```
-
-The Local Review UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It does not add LLM/API calls, connectors, accounts, telemetry, cloud sync, or autonomous actions.
+The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It does not add LLM/API calls, connectors, accounts, telemetry, cloud sync, or autonomous actions.
 
 In the UI:
 
-1. Open the local page.
-2. Initialize the local database if needed.
-3. Add a note to create a pending draft.
-4. Review and approve or reject the draft.
-5. Search approved memories or ask a reflection question.
-6. Export approved memory JSON locally.
+1. Chat with HERmes in the browser.
+2. See HERmes responses and the approved memories used.
+3. Save the latest exchange as a pending draft.
+4. Review pending drafts and approve or reject them.
+5. Add notes as pending drafts.
+6. Search approved memories, ask deterministic reflection questions, or export approved memory JSON locally.
 
-Only approved memories are used for list/search/reflect.
+Only approved memories are used for chat/list/search/reflect. Saving a chat exchange creates a pending draft only; it does not approve memory.
 
-## Core Commands
+What the UI cannot do:
+
+- No LLM/API/provider calls.
+- No external network calls.
+- No tools, shell execution, browser automation, MCP, connectors, schedulers, daemons, subagents, or account access.
+- No autonomous actions.
+- No automatic approved-memory writes.
+- No filesystem crawl; file intake still reads one explicitly supplied file only.
+- No writes outside `.hermes/`, except existing explicit export under `.hermes/export/`.
+
+## Advanced CLI Commands
+
+The terminal chat and CLI commands remain useful for scripting, debugging, and tests:
 
 ```bash
 npx tsx src/cli.ts init
@@ -85,7 +109,7 @@ npx tsx src/cli.ts doctor
 
 ## v0.2 Conversational Idea Mirror
 
-`hermes chat` opens a simple local terminal chat loop. You can type natural messages, and HERmes retrieves relevant approved memories, generates a deterministic reflection or idea response, and prints a short `Memories used` section after each answer.
+`hermes chat` opens a simple local terminal chat loop. It uses the same deterministic chat engine as the web UI. The web UI is now the preferred everyday interface.
 
 Inside chat:
 
@@ -147,7 +171,7 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 `memory_events` stores audit events for draft creation, approval, rejection, memory creation, and export.
 
-`chat_sessions` and `chat_messages` store local terminal chat history. HERmes messages record the approved memory IDs used for each response.
+`chat_sessions` and `chat_messages` store local web and terminal chat history. HERmes messages record the approved memory IDs used for each response.
 
 ## Human Approval Flow
 
@@ -155,7 +179,7 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 2. `review` shows pending drafts.
 3. `approve <draft-id>` writes an approved memory entry and audit events.
 4. `reject <draft-id>` marks a draft rejected and writes an audit event.
-5. `search`, `list`, `reflect`, `chat`, and `export` use approved memory only.
+5. Web chat, terminal chat, `search`, `list`, `reflect`, and `export` use approved memory only.
 
 ## Future LLM Provider Interface
 

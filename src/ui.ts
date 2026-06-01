@@ -2,6 +2,13 @@
 import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import {
+  createChatSession,
+  listChatMessages,
+  listChatSessions,
+  saveLatestChatExchangeDraft,
+  sendChatMessage
+} from "./chat.js";
+import {
   approveDraft,
   doctor,
   exportApprovedMemories,
@@ -15,6 +22,8 @@ import {
 } from "./hermes.js";
 import { formatDoctor } from "./format.js";
 import type {
+  ChatMessage,
+  ChatTurn,
   HermesRuntimeOptions,
   MemoryDraft,
   MemoryEntry,
@@ -34,6 +43,8 @@ interface Notice {
 
 interface RenderState {
   notice?: Notice;
+  activeSessionId?: number;
+  chatTurn?: ChatTurn;
   searchQuery?: string;
   searchResults?: SearchResult[];
   reflection?: ReflectionReport;
@@ -52,6 +63,11 @@ interface StartedUiServer {
   url: string;
 }
 
+interface UiMemorySource {
+  id: number;
+  snippet: string;
+}
+
 const POST_CONTENT_TYPE = "application/x-www-form-urlencoded";
 const FORBIDDEN_LOCAL_REQUEST = "Forbidden: invalid local request origin";
 
@@ -68,6 +84,39 @@ export async function handleUiRequest(
   try {
     if (request.method === "GET" && url.pathname === "/") {
       return htmlResponse(renderPage(runtime));
+    }
+
+    if (request.method === "POST" && url.pathname === "/chat/send") {
+      const form = await readForm(request);
+      const message = requiredFormValue(form, "message", "Chat message is required.");
+      const sessionId = parseOptionalPositiveInteger(form.get("sessionId") ?? "");
+      const chatTurn = sendChatMessage(message, { ...runtime, sessionId });
+      return htmlResponse(renderPage(runtime, { activeSessionId: chatTurn.session.id, chatTurn }));
+    }
+
+    if (request.method === "POST" && url.pathname === "/chat/save-draft") {
+      const form = await readForm(request);
+      const sessionId = parseDraftId(requiredFormValue(form, "sessionId", "Chat session id is required."));
+      const draft = saveLatestChatExchangeDraft(sessionId, runtime);
+      return htmlResponse(
+        renderPage(runtime, {
+          activeSessionId: sessionId,
+          notice: {
+            kind: "success",
+            message: `Created pending draft ${draft.id}. Review and approve it separately if it should become memory.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/chat/new") {
+      const session = createChatSession(runtime, "Web chat");
+      return htmlResponse(
+        renderPage(runtime, {
+          activeSessionId: session.id,
+          notice: { kind: "info", message: "Started a new local chat session." }
+        })
+      );
     }
 
     if (request.method === "GET" && url.pathname === "/memories") {
@@ -183,7 +232,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HERmes Local Review UI</title>
+  <title>HERmes Local Web Chat</title>
   <style>
     :root {
       color-scheme: light;
@@ -425,6 +474,77 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       color: var(--muted);
       margin: 0;
     }
+    .chat-shell {
+      display: grid;
+      gap: 14px;
+    }
+    .chat-thread {
+      display: grid;
+      gap: 12px;
+      min-height: 280px;
+      max-height: 58vh;
+      overflow-y: auto;
+      padding: 6px 2px;
+    }
+    .chat-message {
+      width: min(760px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px 14px;
+      background: #fbfcfb;
+    }
+    .chat-message.user {
+      justify-self: end;
+      background: #eef8f4;
+      border-color: #b7d7cc;
+    }
+    .chat-message.hermes {
+      justify-self: start;
+      background: #ffffff;
+    }
+    .speaker {
+      margin: 0 0 7px;
+      color: var(--muted);
+      font-weight: 750;
+      font-size: 0.86rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .message-body {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .memory-sources {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.93rem;
+    }
+    .memory-sources p {
+      margin: 0;
+    }
+    .chat-compose {
+      display: grid;
+      gap: 10px;
+    }
+    .chat-compose textarea {
+      min-height: 92px;
+    }
+    .chat-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
     @media (max-width: 760px) {
       .topbar,
       .section-head {
@@ -446,13 +566,14 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
   <header>
     <div class="wrap topbar">
       <div>
-        <h1>HERmes Local Review UI</h1>
-        <p class="subtitle">A local interface for creating drafts, approving memory, searching, reflecting, and exporting JSON.</p>
+        <h1>HERmes Local Web Chat</h1>
+        <p class="subtitle">A private local chat and review interface over approved memory. No external calls, no tools, no autonomous actions.</p>
       </div>
       <nav aria-label="Sections">
+        <a href="#chat">Chat</a>
         <a href="#status">Status</a>
-        <a href="#add-note">Add Note</a>
         <a href="#review">Review</a>
+        <a href="#add-note">Add Note</a>
         <a href="#memories">Memories</a>
         <a href="#reflect">Reflect</a>
         <a href="#export">Export</a>
@@ -461,11 +582,24 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
   </header>
   <main class="wrap">
     ${state.notice ? renderNotice(state.notice) : ""}
+    <section id="chat">
+      <div class="section-head">
+        <div>
+          <h2>Chat</h2>
+          <p class="hint">A local deterministic idea mirror. Responses use approved memory only and never approve memory automatically.</p>
+        </div>
+        <form method="post" action="/chat/new">
+          <button class="secondary" type="submit"${model.canReadMemory ? "" : " disabled"}>New Chat</button>
+        </form>
+      </div>
+      ${renderChat(model)}
+    </section>
+
     <section id="status">
       <div class="section-head">
         <div>
-          <h2>Home / Status</h2>
-          <p class="hint">Only approved memories are used for list/search/reflect.</p>
+          <h2>Status</h2>
+          <p class="hint">Only approved memories are used for list/search/reflect/chat.</p>
         </div>
         <form method="post" action="/init">
           <button class="secondary" type="submit">Initialize Local Database</button>
@@ -569,15 +703,112 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
   const canReadMemory = report.dbExists && Object.values(report.tables).every(Boolean);
   const pendingDrafts = canReadMemory ? listPendingDrafts(runtime) : [];
   const approvedMemories = canReadMemory ? listApprovedMemories(runtime) : [];
+  const chatSessions = canReadMemory ? listChatSessions(runtime) : [];
+  const activeSessionId = state.chatTurn?.session.id ?? state.activeSessionId ?? chatSessions.at(-1)?.id;
+  const chatMessages =
+    canReadMemory && activeSessionId ? listChatMessages(activeSessionId, runtime) : [];
+  const latestHermesMessage = findLatestHermesMessage(chatMessages);
+  const latestMemorySources = state.chatTurn
+    ? state.chatTurn.response.memoriesUsed.map(({ memory, snippet }) => ({ id: memory.id, snippet }))
+    : latestHermesMessage
+      ? memorySourcesForMessage(latestHermesMessage, approvedMemories)
+      : [];
   const searchQuery = state.searchQuery ?? "";
 
   return {
     report,
+    canReadMemory,
     pendingDrafts,
     approvedMemories,
+    chatSessions,
+    activeSessionId,
+    chatMessages,
+    latestHermesMessage,
+    latestMemorySources,
     searchQuery,
     searchResults: state.searchResults
   };
+}
+
+function renderChat(model: ReturnType<typeof readUiModel>): string {
+  const sessionInput = model.activeSessionId
+    ? `<input type="hidden" name="sessionId" value="${model.activeSessionId}">`
+    : "";
+  const disabled = model.canReadMemory ? "" : " disabled";
+
+  return `<div class="chat-shell">
+    <div class="chat-thread" aria-live="polite">
+      ${
+        model.chatMessages.length > 0
+          ? model.chatMessages.map((message) => renderChatMessage(message, model.approvedMemories)).join("")
+          : `<p class="empty">No chat messages yet. Start with an idea, question, or "what does this make you think of?"</p>`
+      }
+    </div>
+
+    <form class="chat-compose" method="post" action="/chat/send">
+      ${sessionInput}
+      <label>
+        Message
+        <textarea name="message" required${disabled} placeholder="Ask HERmes to mirror an idea, connect it to memory, or generate directions."></textarea>
+      </label>
+      <div class="chat-toolbar">
+        <div class="actions">
+          <button type="submit"${disabled}>Send</button>
+        </div>
+        <p class="hint">${
+          model.canReadMemory
+            ? "Chat is saved locally in SQLite. Saving an exchange creates a draft only."
+            : "Initialize the local database before chatting."
+        }</p>
+      </div>
+    </form>
+
+    <div class="chat-toolbar">
+      <form method="post" action="/chat/save-draft">
+        ${sessionInput}
+        <button class="secondary" type="submit"${
+          model.activeSessionId && model.latestHermesMessage ? "" : " disabled"
+        }>Save as draft</button>
+      </form>
+      ${renderLatestMemorySources(model.latestHermesMessage, model.latestMemorySources)}
+    </div>
+  </div>`;
+}
+
+function renderChatMessage(message: ChatMessage, approvedMemories: MemoryEntry[]): string {
+  const speaker = message.role === "user" ? "You" : "HERmes";
+  const content = message.role === "hermes" ? stripMemoriesUsedSection(message.content) : message.content;
+  const sources =
+    message.role === "hermes"
+      ? renderMemorySources(memorySourcesForMessage(message, approvedMemories), "No approved memories used for this response.")
+      : "";
+
+  return `<article class="chat-message ${message.role}">
+    <p class="speaker">${speaker}</p>
+    <p class="message-body">${escapeHtml(content)}</p>
+    ${sources}
+  </article>`;
+}
+
+function renderLatestMemorySources(
+  latestHermesMessage: ChatMessage | undefined,
+  sources: UiMemorySource[]
+): string {
+  if (!latestHermesMessage) {
+    return `<div class="memory-sources"><p>Latest memories used: no HERmes response yet.</p></div>`;
+  }
+  return renderMemorySources(sources, "Latest memories used: none.");
+}
+
+function renderMemorySources(sources: UiMemorySource[], emptyText: string): string {
+  if (sources.length === 0) {
+    return `<div class="memory-sources"><p>${escapeHtml(emptyText)}</p></div>`;
+  }
+
+  return `<div class="memory-sources">
+    <p>Memories used:</p>
+    ${sources.map((source) => `<p>- [${source.id}] ${escapeHtml(source.snippet)}</p>`).join("")}
+  </div>`;
 }
 
 function renderNotice(notice: Notice): string {
@@ -659,6 +890,44 @@ function renderReflection(report: ReflectionReport): string {
   </div>`;
 }
 
+function findLatestHermesMessage(messages: ChatMessage[]): ChatMessage | undefined {
+  return messages
+    .filter((message) => message.role === "hermes")
+    .sort((a, b) => b.id - a.id)[0];
+}
+
+function memorySourcesForMessage(message: ChatMessage, approvedMemories: MemoryEntry[]): UiMemorySource[] {
+  const memoriesById = new Map(approvedMemories.map((memory) => [memory.id, memory]));
+  return parseMemoryIds(message.memory_ids_json).map((id) => ({
+    id,
+    snippet: compactText(memoriesById.get(id)?.content ?? "Memory is not available in the approved list.", 140)
+  }));
+}
+
+function parseMemoryIds(memoryIdsJson: string): number[] {
+  try {
+    const parsed = JSON.parse(memoryIdsJson);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((id): id is number => Number.isInteger(id) && id > 0);
+  } catch {
+    return [];
+  }
+}
+
+function stripMemoriesUsedSection(content: string): string {
+  return content.split(/\n\nMemories used:\n/)[0] ?? content;
+}
+
+function compactText(content: string, maxLength: number): string {
+  const compact = content.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
 async function routeNodeRequest(
   incoming: IncomingMessage,
   outgoing: ServerResponse,
@@ -729,6 +998,14 @@ function parseDraftId(value: string): number {
     throw new Error("Draft id must be a positive integer.");
   }
   return draftId;
+}
+
+function parseOptionalPositiveInteger(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return parseDraftId(trimmed);
 }
 
 function formatTags(tagsJson: string): string {
@@ -882,8 +1159,8 @@ const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
 if (import.meta.url === invokedPath) {
   startUiServer(runtimeFromEnvironment())
     .then(({ url }) => {
-      process.stdout.write(`HERmes Local Review UI: ${url}\n`);
-      process.stdout.write("Local-only. Only approved memories are used for list/search/reflect.\n");
+      process.stdout.write(`HERmes Local Web Chat: ${url}\n`);
+      process.stdout.write("Local-only. Only approved memories are used for chat/list/search/reflect.\n");
     })
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
