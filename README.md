@@ -8,16 +8,18 @@ Approved Mind Mirror stores only memories you approve. Chat can suggest memories
 
 ## Conversation Modes
 
-Approved Mind Mirror has two chat modes, selected by environment variables only:
+Approved Mind Mirror has two chat modes, selected by environment variables only. The minimal chat screen shows a subtle label: **Mode: Local** or **Mode: Claude**.
 
-- **Local deterministic (default).** Fully offline. No network calls. Chat responses come from a local rule-based engine. This is the mode unless you explicitly opt in to the API.
-- **Claude API (optional).** When you set the environment variables below, Approved Mind Mirror sends your chat message, recent chat context, and the retrieved approved memories to the Anthropic Claude API to generate the response wording.
+- **Local (default).** Fully offline. No network calls. Chat responses come from a local rule-based engine. This is the mode unless you explicitly opt in to the API.
+- **Claude (optional API).** When you set the environment variables below, Approved Mind Mirror sends your chat message, recent chat context, and the retrieved approved memories to the Anthropic Claude API to generate the response wording.
 
 ```bash
 export HERMES_CHAT_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-...      # read from env only; never stored, logged, or exported
 export HERMES_MODEL=claude-sonnet-4-6 # optional; defaults to claude-sonnet-4-6
 ```
+
+Claude is the first optional API provider. The provider layer is designed so other API/local model providers can be added later (for example OpenAI-compatible endpoints, DeepSeek, Kimi/Moonshot, or a local Ollama model) without changing the UI or memory-approval flow.
 
 Be honest about what API mode means:
 
@@ -89,7 +91,7 @@ npm install
 npm run ui
 ```
 
-The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It adds no connectors, accounts, telemetry, cloud sync, or autonomous actions. A subtle "Mode:" label shows whether chat is running in local deterministic or Claude API mode. The only optional outbound call is the configured Claude API model endpoint, and only when you opt in.
+The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It adds no connectors, accounts, telemetry, cloud sync, or autonomous actions. A subtle "Mode:" label shows whether chat is running in Local or Claude mode. The only optional outbound call is the configured Claude API model endpoint, and only when you opt in.
 
 In the UI:
 
@@ -179,7 +181,7 @@ Example:
 
 ```text
 $ hermes chat
-HERmes chat mode: Local deterministic. Memory approval is always human-only. Type /help for commands or /exit to leave.
+HERmes chat mode: Local. Memory approval is always human-only. Type /help for commands or /exit to leave.
 you> What does this make you think of for Zion Skank?
 HERmes:
 Here are 3 deterministic idea candidates grounded in approved memory.

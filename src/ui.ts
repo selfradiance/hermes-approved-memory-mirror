@@ -1125,11 +1125,11 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         <div class="actions">
           <button type="submit"${disabled}>Send</button>
         </div>
-        <p class="hint">${
+        ${
           model.canReadMemory
-            ? "Saving an exchange only saves it for review."
-            : "Approved Mind Mirror could not open your local memory store."
-        }</p>
+            ? ""
+            : `<p class="hint">Approved Mind Mirror could not open your local memory store.</p>`
+        }
       </div>
     </form>
 

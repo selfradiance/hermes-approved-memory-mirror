@@ -26,6 +26,15 @@ Approved Mind Mirror (internal/codename HERmes) is a local approved-memory mirro
 
 The model may read retrieved approved memories and chat context and may generate response/suggestion text (in API mode). State-changing agency is forbidden: no provider can approve memory, execute tools, browse, access accounts, schedule work, or write approved memory directly.
 
+## Provider configuration layer
+
+`src/llm/chatMode.ts` holds a small provider registry (`CHAT_PROVIDERS`) plus `resolveChatModeConfig`. Each entry is a `ChatProviderDescriptor` with a stable internal `id`, a short non-technical `displayName`, whether it `requiresApiKey`, and the `apiKeyEnvVar` that supplies the key. The UI and CLI read provider display names through `providerDisplayName` / `chatModeLabel` instead of hardcoding strings, so the minimal chat surface shows a subtle "Mode: Local" or "Mode: Claude" label.
+
+- `deterministic` → display name **Local** (default, fully offline).
+- `anthropic` → display name **Claude** (optional API, selected via `HERMES_CHAT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`).
+
+Adding a future provider — for example an OpenAI-compatible endpoint, DeepSeek, Kimi/Moonshot, or a local Ollama model — means adding a descriptor to the registry, an id to `ChatProviderId`, and a `ChatProvider` implementation selected in `resolveChatProvider`; no UI or business-logic change is needed for the label. API keys are read from environment variables only for the single model call: they are never stored in SQLite, surfaced in the UI, logged, or included in errors/exports. Regardless of provider, the interface stays the same — providers receive only the selected approved-memory context and current chat context, get no tools, and cannot approve or write memory.
+
 ## Data Flow
 
 1. Intake receives explicit text or one explicit file path.

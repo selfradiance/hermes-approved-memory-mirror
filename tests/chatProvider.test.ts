@@ -12,7 +12,12 @@ import {
   AnthropicChatProvider,
   HERMES_SYSTEM_PROMPT
 } from "../src/llm/anthropicChatProvider.js";
-import { resolveChatModeConfig } from "../src/llm/chatMode.js";
+import {
+  CHAT_PROVIDERS,
+  chatModeLabel,
+  providerDisplayName,
+  resolveChatModeConfig
+} from "../src/llm/chatMode.js";
 import {
   approveDraft,
   initHermes,
@@ -47,7 +52,7 @@ function approveText(root: string, text: string): number {
 /** A fake API-style provider so tests never make real network calls. */
 class FakeApiProvider implements ChatProvider {
   readonly id = "anthropic" as const;
-  readonly label = "Claude API";
+  readonly label = "Claude";
   lastInput?: ChatGenerationInput;
 
   constructor(private readonly result: ChatGenerationResult) {}
@@ -60,7 +65,7 @@ class FakeApiProvider implements ChatProvider {
 
 class ThrowingProvider implements ChatProvider {
   readonly id = "anthropic" as const;
-  readonly label = "Claude API";
+  readonly label = "Claude";
 
   async generate(): Promise<ChatGenerationResult> {
     throw new Error("Claude API request failed with status 500.");
@@ -78,6 +83,18 @@ describe("chat provider abstraction", () => {
     const config = resolveChatModeConfig({});
     expect(config.id).toBe("deterministic");
     expect(resolveChatProvider().id).toBe("deterministic");
+  });
+
+  it("exposes short, non-technical provider display names through the registry", () => {
+    expect(providerDisplayName("deterministic")).toBe("Local");
+    expect(providerDisplayName("anthropic")).toBe("Claude");
+    expect(CHAT_PROVIDERS.anthropic.requiresApiKey).toBe(true);
+    expect(CHAT_PROVIDERS.anthropic.apiKeyEnvVar).toBe("ANTHROPIC_API_KEY");
+    expect(CHAT_PROVIDERS.deterministic.requiresApiKey).toBe(false);
+    expect(chatModeLabel({})).toBe("Local");
+    expect(
+      chatModeLabel({ HERMES_CHAT_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-test-123" })
+    ).toBe("Claude");
   });
 
   it("selects the Anthropic provider only when provider and key are present", () => {
@@ -104,7 +121,7 @@ describe("chat provider abstraction", () => {
     });
 
     expect(turn.providerId).toBe("anthropic");
-    expect(turn.providerLabel).toBe("Claude API");
+    expect(turn.providerLabel).toBe("Claude");
     expect(turn.providerError).toBeUndefined();
     expect(turn.hermesMessage.content).toContain("Mirrored in API mode.");
     expect(provider.lastInput?.userMessage).toBe("Reflect on local-first memory.");

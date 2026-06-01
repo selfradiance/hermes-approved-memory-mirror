@@ -90,6 +90,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it.");
     expect(html).not.toContain("No chat messages yet.");
     expect(html).not.toContain("Started a new local chat session.");
+    expect(html).not.toContain("Saving an exchange only saves it for review.");
     expect(html).toContain('placeholder="Message…"');
   });
 
@@ -132,7 +133,9 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Mode: Local deterministic");
+    expect(html).toContain("Mode: Local");
+    expect(html).not.toContain("Mode: Local deterministic");
+    expect(html).not.toContain("Mode: Claude API");
     expect(html).not.toContain(">System</a>");
     expect(html).toContain(">Diagnostics</a>");
   });
