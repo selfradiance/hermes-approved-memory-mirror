@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { openDatabase, tableExists, TABLES } from "./db.js";
 import { createDraftProposalFromText } from "./draftGeneration.js";
 import { createDraftFromText, retrieveRelevantApprovedMemories } from "./hermes.js";
+import { retrieveRelevantSourceChunks } from "./sources.js";
 import { AnthropicChatProvider } from "./llm/anthropicChatProvider.js";
 import { DETERMINISTIC_LABEL, resolveChatModeConfig } from "./llm/chatMode.js";
 import type {
@@ -161,11 +162,13 @@ export async function sendChatMessage(
   }
 
   const memoriesUsed = retrieveRelevantApprovedMemories(normalized, { ...options, limit: 5 });
+  const sourceChunks = retrieveRelevantSourceChunks(normalized, { ...options, limit: 3 });
   const recentMessages = options.sessionId ? gatherRecentContext(options.sessionId, options) : [];
   const generationInput: ChatGenerationInput = {
     userMessage: normalized,
     recentMessages,
-    memories: memoriesUsed
+    memories: memoriesUsed,
+    sourceChunks
   };
 
   const provider = resolveChatProvider(options);

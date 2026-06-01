@@ -24,6 +24,15 @@ import {
   rejectDraft,
   searchApprovedMemories
 } from "./hermes.js";
+import {
+  getSource,
+  getSourceChunks,
+  importSource,
+  listSources,
+  retrieveRelevantSourceChunks,
+  searchSourceChunks,
+  suggestMemoriesFromSource
+} from "./sources.js";
 import { chatModeLabel } from "./llm/chatMode.js";
 import { formatDoctor } from "./format.js";
 import type {
@@ -34,7 +43,10 @@ import type {
   MemoryEntry,
   MemorySuggestion,
   ReflectionReport,
-  SearchResult
+  SearchResult,
+  SourceChunk,
+  SourceChunkResult,
+  SourceSummary
 } from "./types.js";
 
 export const DEFAULT_UI_HOST = "127.0.0.1";
@@ -56,6 +68,9 @@ interface RenderState {
   searchResults?: SearchResult[];
   reflection?: ReflectionReport;
   exportPath?: string;
+  selectedSourceId?: number;
+  sourceSearchQuery?: string;
+  sourceSearchResults?: SourceChunkResult[];
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -258,6 +273,59 @@ export async function handleUiRequest(
         renderSystemPage(runtime, {
           exportPath,
           notice: { kind: "success", message: "Approved memories exported locally." }
+        })
+      );
+    }
+
+    if (request.method === "GET" && url.pathname === "/sources") {
+      const selectedSourceId = parseOptionalPositiveInteger(url.searchParams.get("source") ?? "");
+      const sourceSearchQuery = (url.searchParams.get("query") ?? "").trim();
+      const sourceSearchResults = sourceSearchQuery
+        ? searchSourceChunks(sourceSearchQuery, runtime)
+        : undefined;
+      return htmlResponse(
+        renderSourcesPage(runtime, { selectedSourceId, sourceSearchQuery, sourceSearchResults })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/import") {
+      const form = await readForm(request);
+      const filename = requiredFormValue(form, "filename", "A file is required to import a source.");
+      const content = form.get("content") ?? "";
+      const title = (form.get("title") ?? "").trim() || undefined;
+      const source = importSource({ filename, content, title }, runtime);
+      return htmlResponse(
+        renderSourcesPage(runtime, {
+          selectedSourceId: source.id,
+          notice: {
+            kind: "success",
+            message: `Imported "${source.title}" as a source with ${source.chunk_count} excerpt${
+              source.chunk_count === 1 ? "" : "s"
+            }. It is not an approved memory.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/suggest") {
+      const form = await readForm(request);
+      const sourceId = parsePositiveInteger(
+        requiredFormValue(form, "sourceId", "Source id is required."),
+        "Source id"
+      );
+      const drafts = suggestMemoriesFromSource(sourceId, runtime);
+      return htmlResponse(
+        renderSourcesPage(runtime, {
+          selectedSourceId: sourceId,
+          notice: {
+            kind: drafts.length > 0 ? "success" : "info",
+            message:
+              drafts.length > 0
+                ? `Saved ${drafts.length} memory suggestion${
+                    drafts.length === 1 ? "" : "s"
+                  } for review. Approve each one when you’re ready.`
+                : "No clear durable statements were found in this source to suggest."
+          }
         })
       );
     }
@@ -701,6 +769,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
         <h1>Approved Mind Mirror</h1>
       </div>
       <nav class="top-actions" aria-label="App actions">
+        <a href="/sources">Sources</a>
         <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
         <a href="#add-memory">Add memory</a>
       </nav>
@@ -1063,6 +1132,241 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
 </html>`;
 }
 
+function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {}): string {
+  const model = readUiModel(runtime, state);
+  const sources = model.canReadMemory ? listSources(runtime) : [];
+  const selectedSource =
+    state.selectedSourceId !== undefined ? getSource(state.selectedSourceId, runtime) : undefined;
+  const selectedChunks =
+    selectedSource !== undefined ? getSourceChunks(selectedSource.id, runtime) : [];
+  const sourceSearchQuery = state.sourceSearchQuery ?? "";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Approved Mind Mirror Sources</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17201e;
+      --muted: #66736f;
+      --line: #d9e1de;
+      --paper: #f6f8f7;
+      --panel: #ffffff;
+      --accent: #236b58;
+      --accent-strong: #174d3f;
+      --danger: #a43a32;
+      --blue: #2a5d84;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .wrap { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 42px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 18px; }
+    h1, h2 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 1.55rem; }
+    h2 { font-size: 1.08rem; }
+    a { color: var(--accent-strong); }
+    .back-link, button {
+      display: inline-flex; align-items: center; justify-content: center; min-height: 38px;
+      border-radius: 6px; padding: 8px 11px; font: inherit; font-weight: 700;
+    }
+    .back-link { border: 1px solid var(--line); background: #fbfcfb; text-decoration: none; }
+    button { border: 0; color: #fff; background: var(--accent); cursor: pointer; }
+    button.secondary { color: var(--accent-strong); border: 1px solid var(--line); background: #fbfcfb; }
+    main, .stack { display: grid; gap: 14px; }
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .hint, .meta, .empty { color: var(--muted); }
+    .hint { margin: 4px 0 0; }
+    .notice { border-radius: 8px; padding: 12px 14px; border: 1px solid var(--line); background: #eef8f4; color: var(--accent-strong); }
+    .notice.error { background: #fff2f1; color: var(--danger); border-color: #e8c6c2; }
+    .notice.info { background: #eef5fb; color: var(--blue); border-color: #c8d9e7; }
+    .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+    label { display: grid; gap: 7px; font-weight: 650; }
+    input[type="search"], input[type="text"], input[type="file"] {
+      width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 11px 12px;
+      color: var(--ink); background: #fff; font: inherit;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .item { border-top: 1px solid var(--line); padding-top: 14px; }
+    .item:first-child { border-top: 0; padding-top: 0; }
+    .item-title { margin: 0 0 6px; font-weight: 750; }
+    .content { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+    .excerpt { border: 1px solid var(--line); border-radius: 7px; padding: 12px; background: #fbfcfb; }
+    @media (max-width: 760px) {
+      header, .search-row { display: grid; grid-template-columns: 1fr; }
+      button, .back-link { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Sources</h1>
+        <p class="hint">Imported documents you can search and draw memory suggestions from. Sources are not approved memories.</p>
+      </div>
+      <a class="back-link" href="/">Back to chat</a>
+    </header>
+    <main>
+      ${state.notice ? renderNotice(state.notice) : ""}
+
+      <section>
+        <h2>Import a source</h2>
+        <p class="hint">Markdown (.md, .markdown) or plain text (.txt), up to about 1 MB of text. The file stays on your computer.</p>
+        ${
+          model.canReadMemory
+            ? `<form class="stack" method="post" action="/sources/import" id="import-form" style="margin-top: 12px;">
+                <label>
+                  Title (optional)
+                  <input type="text" name="title" placeholder="A short name for this source">
+                </label>
+                <label>
+                  Choose a file
+                  <input type="file" id="source-file" accept=".md,.markdown,.txt,text/markdown,text/plain">
+                </label>
+                <input type="hidden" name="filename" id="source-filename">
+                <input type="hidden" name="content" id="source-content">
+                <div class="actions">
+                  <button type="submit">Import source</button>
+                </div>
+              </form>`
+            : `<p class="empty">Your local memory store could not be opened, so importing is unavailable.</p>`
+        }
+      </section>
+
+      <section>
+        <h2>Search source excerpts</h2>
+        <form class="search-row" method="get" action="/sources" style="margin-top: 12px;">
+          <label>
+            Search imported sources
+            <input type="search" name="query" value="${escapeAttribute(sourceSearchQuery)}" placeholder="Search text inside your sources">
+          </label>
+          <button type="submit">Search</button>
+        </form>
+        <div class="stack" style="margin-top: 16px;">
+          ${renderSourceSearchResults(sourceSearchQuery, state.sourceSearchResults)}
+        </div>
+      </section>
+
+      <section>
+        <h2>Your sources</h2>
+        <div class="stack" style="margin-top: 12px;">
+          ${renderSourceList(sources)}
+        </div>
+      </section>
+
+      ${selectedSource ? renderSelectedSource(selectedSource, selectedChunks) : ""}
+    </main>
+  </div>
+  <script>
+    (function () {
+      var form = document.getElementById("import-form");
+      if (!form) { return; }
+      var fileInput = document.getElementById("source-file");
+      var filenameField = document.getElementById("source-filename");
+      var contentField = document.getElementById("source-content");
+      form.addEventListener("submit", function (event) {
+        var file = fileInput && fileInput.files && fileInput.files[0];
+        if (!file) {
+          event.preventDefault();
+          alert("Please choose a Markdown or text file to import.");
+          return;
+        }
+        if (contentField.value) { return; }
+        event.preventDefault();
+        var reader = new FileReader();
+        reader.onload = function () {
+          filenameField.value = file.name;
+          contentField.value = String(reader.result || "");
+          if (typeof form.requestSubmit === "function") { form.requestSubmit(); } else { form.submit(); }
+        };
+        reader.readAsText(file);
+      });
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+function renderSourceList(sources: SourceSummary[]): string {
+  if (sources.length === 0) {
+    return `<p class="empty">No sources imported yet.</p>`;
+  }
+
+  return sources
+    .map(
+      (source) => `<article class="item">
+      <p class="item-title">${escapeHtml(source.title)}</p>
+      <p class="meta">File: ${escapeHtml(source.original_filename)} · Imported: ${escapeHtml(
+        source.imported_at
+      )} · Excerpts: ${source.chunk_count}</p>
+      <div class="actions" style="margin-top: 10px;">
+        <a class="back-link" href="/sources?source=${source.id}">View excerpts</a>
+        <form method="post" action="/sources/suggest">
+          <input type="hidden" name="sourceId" value="${source.id}">
+          <button class="secondary" type="submit">Suggest memories from this source</button>
+        </form>
+      </div>
+    </article>`
+    )
+    .join("");
+}
+
+function renderSelectedSource(source: SourceSummary, chunks: SourceChunk[]): string {
+  return `<section>
+    <h2>${escapeHtml(source.title)}</h2>
+    <p class="hint">File: ${escapeHtml(source.original_filename)} · ${chunks.length} excerpt${
+      chunks.length === 1 ? "" : "s"
+    }. Excerpts are raw source text, not approved memory.</p>
+    <div class="stack" style="margin-top: 14px;">
+      ${
+        chunks.length === 0
+          ? `<p class="empty">This source has no excerpts.</p>`
+          : chunks
+              .map(
+                (chunk) => `<div class="excerpt">
+            <p class="meta">Excerpt ${chunk.chunk_index + 1}</p>
+            <p class="content">${escapeHtml(chunk.content)}</p>
+          </div>`
+              )
+              .join("")
+      }
+    </div>
+  </section>`;
+}
+
+function renderSourceSearchResults(
+  query: string,
+  results: SourceChunkResult[] | undefined
+): string {
+  if (!query) {
+    return `<p class="empty">Enter a search to look inside your imported sources.</p>`;
+  }
+
+  const found = results ?? [];
+  if (found.length === 0) {
+    return `<p class="empty">No source excerpts matched "${escapeHtml(query)}".</p>`;
+  }
+
+  return found
+    .map(
+      ({ chunk, sourceTitle, snippet }) => `<article class="item">
+      <p class="item-title">${escapeHtml(sourceTitle)} · excerpt ${chunk.chunk_index + 1}</p>
+      <p class="content">${escapeHtml(snippet)}</p>
+    </article>`
+    )
+    .join("");
+}
+
 function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
   const report = doctor(runtime);
   const canReadMemory = report.dbExists && Object.values(report.tables).every(Boolean);
@@ -1082,6 +1386,11 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     state.memorySuggestion ??
     state.chatTurn?.memorySuggestion ??
     (canReadMemory && activeSessionId ? getLatestMemorySuggestion(activeSessionId, runtime) : undefined);
+  const latestUserMessage = [...chatMessages].reverse().find((message) => message.role === "user");
+  const latestSourceExcerpts =
+    canReadMemory && latestUserMessage
+      ? retrieveRelevantSourceChunks(latestUserMessage.content, { ...runtime, limit: 3 })
+      : [];
   const searchQuery = state.searchQuery ?? "";
   const modeLabel = state.chatTurn?.providerLabel ?? chatModeLabel();
 
@@ -1097,6 +1406,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     latestHermesMessage,
     latestMemorySources,
     latestMemorySuggestion,
+    latestSourceExcerpts,
     searchQuery,
     searchResults: state.searchResults
   };
@@ -1141,8 +1451,28 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         }>Save for review</button>
       </form>
       ${renderLatestMemorySources(model.latestHermesMessage, model.latestMemorySources)}
+      ${renderSourceExcerpts(model.latestSourceExcerpts)}
     </div>
   </div>`;
+}
+
+function renderSourceExcerpts(excerpts: SourceChunkResult[]): string {
+  if (excerpts.length === 0) {
+    return "";
+  }
+
+  return `<details class="memory-sources source-excerpts">
+    <summary>Source excerpts</summary>
+    <p>Raw passages from imported sources. These are reference only, not approved memory.</p>
+    <ul>
+      ${excerpts
+        .map(
+          ({ chunk, sourceTitle, snippet }) =>
+            `<li>${escapeHtml(sourceTitle)} (excerpt ${chunk.chunk_index + 1}): ${escapeHtml(snippet)}</li>`
+        )
+        .join("")}
+    </ul>
+  </details>`;
 }
 
 function renderChatMessage(message: ChatMessage, approvedMemories: MemoryEntry[]): string {

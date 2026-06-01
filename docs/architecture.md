@@ -8,6 +8,7 @@ Approved Mind Mirror (internal/codename HERmes) is a local approved-memory mirro
 - `src/chat.ts` contains deterministic chat response, idea mode, organic memory suggestion, chat persistence logic, the `DeterministicChatProvider`, and `resolveChatProvider`.
 - `src/ui.ts` contains the loopback-only HTTP server and server-rendered local web chat/review UI.
 - `src/hermes.ts` contains the memory workflow operations.
+- `src/sources.ts` contains the source library: import (deterministic chunking, content hash, size limit), listing, search, source-grounded memory suggestions, and chat retrieval of relevant source excerpts.
 - `src/db.ts` owns database path resolution, schema creation, and SQLite access.
 - `src/draftGeneration.ts` contains deterministic draft proposal logic.
 - `src/format.ts` formats CLI output.
@@ -17,9 +18,9 @@ Approved Mind Mirror (internal/codename HERmes) is a local approved-memory mirro
 
 ## Layered design
 
-1. **Local memory store** — SQLite under `.hermes/`, owned by `src/db.ts`. Approved memory lives in `memory_entries`.
-2. **Retrieval layer** — `retrieveRelevantApprovedMemories` in `src/hermes.ts` selects approved memories relevant to a chat message.
-3. **Provider layer** — the `ChatProvider` interface. It receives the user message, recent chat context, and retrieved approved memories, and returns response text plus an optional proposed memory suggestion. Providers are given no tools.
+1. **Local memory store** — SQLite under `.hermes/`, owned by `src/db.ts`. Approved memory lives in `memory_entries`. Imported documents live in `sources`/`source_chunks` and are raw, not approved.
+2. **Retrieval layer** — `retrieveRelevantApprovedMemories` in `src/hermes.ts` selects approved memories relevant to a chat message. `retrieveRelevantSourceChunks` in `src/sources.ts` selects relevant raw source excerpts using the same term-overlap approach (no embeddings).
+3. **Provider layer** — the `ChatProvider` interface. It receives the user message, recent chat context, retrieved approved memories, and relevant source excerpts, and returns response text plus an optional proposed memory suggestion. Providers are given no tools. The provider prompt distinguishes durable approved memory from raw, possibly incomplete source excerpts.
 4. **Deterministic fallback** — `DeterministicChatProvider` is the default and is used whenever API mode is not configured or an API call fails. Its text is identical to the prior offline behavior.
 5. **Optional API provider** — `AnthropicChatProvider` is used only when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are present.
 6. **Approval boundary** — only explicit human approval (`approveDraft`) writes `memory_entries`. No provider can cross this boundary.
@@ -53,6 +54,14 @@ chat message -> memory suggestion -> save for review -> approve memory -> approv
 ```
 
 Direct requests such as "remember that..." skip the suggestion card and save the statement for review, not as an approved memory.
+
+Source library flow (v0.4.0):
+
+```text
+source import -> source library (sources/source_chunks) -> source excerpts -> memory suggestions (save for review) -> approve memory -> approved memory
+```
+
+Sources may be imported, searched, viewed, and used to propose memory suggestions, and relevant excerpts may be retrieved into chat context. None of these paths write `memory_entries`. The approval boundary is unchanged: only explicit `approveDraft` creates approved memory. The model may read selected source excerpts and approved memories to generate a response; it may not approve memory, execute tools, browse, access accounts, schedule work, or write approved memory directly. File import reads only the file the user explicitly selects (read client-side in the browser and posted as text); it never crawls or reads arbitrary filesystem paths, and a per-file size limit (~1 MB of text) applies.
 
 ## User-Facing Language vs. Internal Storage
 

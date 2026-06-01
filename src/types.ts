@@ -20,6 +20,7 @@ export interface ChatGenerationInput {
   userMessage: string;
   recentMessages: ChatProviderContextMessage[];
   memories: SearchResult[];
+  sourceChunks?: SourceChunkResult[];
 }
 
 export interface ChatGenerationResult {
@@ -112,6 +113,38 @@ export interface MemorySuggestion {
 
 export interface SearchResult {
   memory: MemoryEntry;
+  snippet: string;
+}
+
+export type SourceStatus = "active" | "archived";
+
+export interface Source {
+  id: number;
+  title: string;
+  original_filename: string;
+  source_type: string;
+  imported_at: string;
+  content_hash: string;
+  size_bytes: number;
+  status: SourceStatus;
+}
+
+export interface SourceChunk {
+  id: number;
+  source_id: number;
+  chunk_index: number;
+  content: string;
+  char_count: number;
+  created_at: string;
+}
+
+export interface SourceSummary extends Source {
+  chunk_count: number;
+}
+
+export interface SourceChunkResult {
+  chunk: SourceChunk;
+  sourceTitle: string;
   snippet: string;
 }
 

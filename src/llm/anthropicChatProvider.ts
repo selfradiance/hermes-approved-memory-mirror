@@ -2,7 +2,8 @@ import type {
   ChatGenerationInput,
   ChatGenerationResult,
   ChatProvider,
-  SearchResult
+  SearchResult,
+  SourceChunkResult
 } from "../types.js";
 import { ANTHROPIC_LABEL } from "./chatMode.js";
 
@@ -19,6 +20,8 @@ export const HERMES_SYSTEM_PROMPT = [
   "Do not claim to have performed actions.",
   "Do not say you saved memory unless the app explicitly saved it for review.",
   "Suggest memory only when the user states a durable preference, decision, goal, project direction, or recurring pattern.",
+  "Approved memories are durable, human-approved context. Source excerpts are raw, possibly incomplete passages from imported documents.",
+  "Treat source excerpts as reference material only; never present them as approved memory, and prefer approved memories when they conflict.",
   "You have no tools, cannot browse, cannot run code, and cannot approve or write memory.",
   `When (and only when) a durable item is worth remembering, end your reply with a separate final line in the exact form "${MEMORY_SUGGESTION_PREFIX} <one concise sentence>". Otherwise omit that line entirely.`
 ].join("\n");
@@ -55,7 +58,11 @@ export class AnthropicChatProvider implements ChatProvider {
   }
 
   async generate(input: ChatGenerationInput): Promise<ChatGenerationResult> {
-    const system = `${HERMES_SYSTEM_PROMPT}\n\n${formatMemoryContext(input.memories)}`;
+    const system = [
+      HERMES_SYSTEM_PROMPT,
+      formatMemoryContext(input.memories),
+      formatSourceContext(input.sourceChunks ?? [])
+    ].join("\n\n");
     const messages = [
       ...input.recentMessages.map((message) => ({
         role: message.role === "user" ? ("user" as const) : ("assistant" as const),
@@ -109,6 +116,20 @@ function formatMemoryContext(memories: SearchResult[]): string {
   return [
     "Retrieved approved memories (cite the [id] when one informs your reply):",
     ...memories.map(({ memory, snippet }) => `- [${memory.id}] ${compact(snippet, 280)}`)
+  ].join("\n");
+}
+
+function formatSourceContext(sourceChunks: SourceChunkResult[]): string {
+  if (sourceChunks.length === 0) {
+    return "Source excerpts: none.";
+  }
+
+  return [
+    "Source excerpts (raw passages from imported documents; reference only, not approved memory):",
+    ...sourceChunks.map(
+      ({ chunk, sourceTitle, snippet }) =>
+        `- "${compact(sourceTitle, 80)}" (excerpt ${chunk.chunk_index + 1}): ${compact(snippet, 280)}`
+    )
   ].join("\n");
 }
 

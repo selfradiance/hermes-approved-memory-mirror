@@ -141,6 +141,30 @@ chat message -> memory suggestion -> save for review -> approve memory -> approv
 
 In local deterministic mode the detector is local and rule-based. In optional Claude API mode the model may also propose a suggestion. In both modes a suggestion is only saved for review on your action, never browsed for, and never turned into an approved memory without explicit approval.
 
+## Sources (Markdown / Text Import)
+
+As of v0.4.0 you can import local documents into a **source library**. A source is a raw imported document; an approved memory is distilled, durable context you have approved. Importing a source does **not** create an approved memory.
+
+- Supported types: Markdown (`.md`, `.markdown`) and plain text (`.txt`). Other file types are rejected with a friendly message.
+- Size limit: about 1 MB of text per file. Larger files are rejected.
+- Sources stay local. The file you choose is read in your browser and its text is stored in the same local SQLite database under `.hermes/`. The app never reads arbitrary filesystem paths — only the file you explicitly select.
+- Imported text is split into ordered **excerpts** (chunks) so it can be searched and shown in readable pieces.
+
+In the `Sources` page (linked from the chat header) you can:
+
+1. Import a Markdown or text file.
+2. See your sources with title, filename, import date, and excerpt count.
+3. Search inside your sources.
+4. View a source's excerpts.
+5. Use **Suggest memories from this source** to create save-for-review items. These are never auto-approved; approval still happens through the review flow.
+
+When you chat, Approved Mind Mirror may include relevant **source excerpts** alongside **approved memories**. The two are clearly distinguished:
+
+- "Sources from your memory" are approved memories.
+- "Source excerpts" are raw passages from imported documents, shown as secondary/collapsible reference only.
+
+In optional Claude API mode, the model receives your message, recent chat, retrieved approved memories, **and** relevant source excerpts. The system prompt instructs it to treat approved memories as durable context and source excerpts as raw reference material — never as approved memory. The model still has no tools, takes no actions, and cannot approve memory.
+
 ## Advanced CLI Commands
 
 The terminal chat and CLI commands remain useful for scripting, debugging, and tests:
@@ -227,6 +251,8 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 `chat_sessions` and `chat_messages` store local web and terminal chat history. Assistant messages record the approved memory IDs used for each response.
 
 `memory_suggestion_dismissals` stores local dismissal markers so an ignored organic suggestion does not keep reappearing for the same chat message.
+
+`sources` stores imported documents (title, original filename, type, import time, content hash, size, status). `source_chunks` stores the ordered excerpts for each source. Sources are raw imported text and are never treated as approved memory; only explicit draft approval writes `memory_entries`.
 
 ## Human Approval Flow
 
