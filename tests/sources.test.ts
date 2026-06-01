@@ -10,11 +10,12 @@ import {
   retrieveRelevantSourceChunks,
   searchSourceChunks,
   suggestMemoriesFromSource,
+  MAX_BATCH_CHARS,
   MAX_SOURCE_BYTES
 } from "../src/sources.js";
 import { sendChatMessage } from "../src/chat.js";
 import { AnthropicChatProvider } from "../src/llm/anthropicChatProvider.js";
-import { initHermes, listApprovedMemories, listPendingDrafts } from "../src/hermes.js";
+import { approveDraft, initHermes, listApprovedMemories, listPendingDrafts } from "../src/hermes.js";
 import { handleUiRequest } from "../src/ui.js";
 import type {
   ChatGenerationInput,
@@ -111,6 +112,41 @@ class FailingExtractionProvider implements ChatProvider {
     throw new Error("Claude API request failed with status 500.");
   }
 }
+
+// Records how the full-source workflow batches and orders the chunks it sends.
+class RecordingExtractionProvider implements ChatProvider {
+  readonly id = "anthropic" as const;
+  readonly label = "Claude";
+  callCount = 0;
+  receivedChunkIndexes: number[] = [];
+  lastInput?: SourceExtractionInput;
+
+  constructor(private readonly candidates: SourceMemoryCandidate[]) {}
+
+  async generate(): Promise<ChatGenerationResult> {
+    return { responseText: "ok", mode: "reflection", ideaCandidates: [] };
+  }
+
+  async extractSourceMemories(input: SourceExtractionInput): Promise<SourceMemoryCandidate[]> {
+    this.callCount += 1;
+    this.lastInput = input;
+    this.receivedChunkIndexes.push(...input.chunks.map((chunk) => chunk.chunkIndex));
+    return this.candidates;
+  }
+}
+
+const TEN_DISTINCT_CANDIDATES: SourceMemoryCandidate[] = [
+  { content: "James prefers Seedance shot-by-shot prompts for storyboard consistency.", category: "preference", tags: ["video"] },
+  { content: "James holds a long-term Bitcoin thesis and treats it as the hardest money.", category: "preference", tags: ["bitcoin"] },
+  { content: "James trains every morning to stay grounded and focused.", category: "routine", tags: ["health"] },
+  { content: "James makes the smallest safe change and verifies it before moving on.", category: "principle", tags: ["coding"] },
+  { content: "James values concise idea-oriented conversations over long summaries.", category: "preference", tags: ["communication"] },
+  { content: "James keeps watermarks and logos off the final video frames.", category: "preference", tags: ["video"] },
+  { content: "James pushes commits to GitHub immediately after verification.", category: "workflow", tags: ["git"] },
+  { content: "James reads the project context file before making any changes.", category: "workflow", tags: ["process"] },
+  { content: "James prefers TypeScript with strict compiler settings for new code.", category: "preference", tags: ["typescript"] },
+  { content: "James schedules deep creative work during quiet morning hours.", category: "routine", tags: ["focus"] }
+];
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
@@ -221,7 +257,7 @@ describe("source-grounded memory suggestions", () => {
       runtime(root)
     );
 
-    const drafts = await suggestMemoriesFromSource(summary.id, runtime(root));
+    const { drafts } = await suggestMemoriesFromSource(summary.id, runtime(root));
     expect(drafts.length).toBeGreaterThan(0);
     expect(drafts.every((draft) => draft.status === "pending")).toBe(true);
     expect(drafts.every((draft) => draft.source_type === "source")).toBe(true);
@@ -237,7 +273,7 @@ describe("source-grounded memory suggestions", () => {
       runtime(root)
     );
 
-    const drafts = await suggestMemoriesFromSource(summary.id, runtime(root));
+    const { drafts } = await suggestMemoriesFromSource(summary.id, runtime(root));
     const contents = drafts.map((draft) => draft.proposed_content);
 
     // Headings, titles, and "purpose" metadata must never become memories.
@@ -265,7 +301,7 @@ describe("source-grounded memory suggestions", () => {
       runtime(root)
     );
 
-    const drafts = await suggestMemoriesFromSource(summary.id, { ...runtime(root), limit: 50 });
+    const { drafts } = await suggestMemoriesFromSource(summary.id, { ...runtime(root), limit: 50 });
     expect(drafts.length).toBeLessThanOrEqual(10);
   });
 
@@ -280,7 +316,7 @@ describe("source-grounded memory suggestions", () => {
       { content: "James holds a long-term Bitcoin thesis and treats it as the hardest money.", category: "preference", tags: ["bitcoin"], chunkIndexes: [0] }
     ]);
 
-    const drafts = await suggestMemoriesFromSource(summary.id, {
+    const { drafts } = await suggestMemoriesFromSource(summary.id, {
       ...runtime(root),
       chatProvider: provider
     });
@@ -300,7 +336,7 @@ describe("source-grounded memory suggestions", () => {
     );
 
     const provider = new FailingExtractionProvider();
-    const drafts = await suggestMemoriesFromSource(summary.id, {
+    const { drafts, diagnostics } = await suggestMemoriesFromSource(summary.id, {
       ...runtime(root),
       chatProvider: provider
     });
@@ -308,6 +344,125 @@ describe("source-grounded memory suggestions", () => {
     expect(provider.called).toBe(true);
     expect(drafts.length).toBeGreaterThan(0);
     expect(drafts.every((draft) => draft.source_type === "source")).toBe(true);
+    // A genuine provider failure falls back to deterministic extraction.
+    expect(diagnostics.mode).toBe("deterministic");
+  });
+
+  it("uses provider results without deterministic fallback when the provider succeeds", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "zion-skank.md", content: SAMPLE_MARKDOWN },
+      runtime(root)
+    );
+
+    const provider = new FakeExtractionProvider([
+      { content: "James holds a long-term Bitcoin thesis and treats it as the hardest money.", category: "preference", tags: ["bitcoin"] }
+    ]);
+
+    const { drafts, diagnostics } = await suggestMemoriesFromSource(summary.id, {
+      ...runtime(root),
+      chatProvider: provider
+    });
+
+    expect(diagnostics.mode).toBe("provider");
+    expect(drafts).toHaveLength(1);
+    // The provider's single result is used; the deterministic Seedance/watermark
+    // sentences from the source are not mixed in.
+    expect(drafts[0]?.proposed_content).toContain("Bitcoin");
+  });
+
+  it("returns the requested number of suggestions when enough strong material exists", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "zion-skank.md", content: SAMPLE_MARKDOWN },
+      runtime(root)
+    );
+
+    const provider = new FakeExtractionProvider(TEN_DISTINCT_CANDIDATES);
+    const { drafts, diagnostics } = await suggestMemoriesFromSource(summary.id, {
+      ...runtime(root),
+      chatProvider: provider,
+      limit: 7
+    });
+
+    expect(drafts).toHaveLength(7);
+    expect(diagnostics.requestedCount).toBe(7);
+    expect(diagnostics.providerReturnedCount).toBe(10);
+  });
+
+  it("reviews the whole source in ordered batches for a large source and dedupes results", async () => {
+    const root = makeProject();
+    const paragraphs: string[] = [];
+    for (let i = 0; i < 40; i += 1) {
+      paragraphs.push(`Section ${i}. ${"filler ".repeat(150).trim()}.`);
+    }
+    const summary = importSource(
+      { filename: "big.md", content: paragraphs.join("\n\n") },
+      runtime(root)
+    );
+    expect(summary.chunk_count).toBeGreaterThan(1);
+
+    const provider = new RecordingExtractionProvider([
+      { content: "James prefers Seedance shot-by-shot prompts for storyboard consistency.", category: "preference", tags: [] },
+      { content: "James holds a long-term Bitcoin thesis and treats it as the hardest money.", category: "preference", tags: [] }
+    ]);
+
+    const { drafts, diagnostics } = await suggestMemoriesFromSource(summary.id, {
+      ...runtime(root),
+      chatProvider: provider,
+      limit: 5
+    });
+
+    // The whole source is reviewed across more than one batch, in source order.
+    expect(diagnostics.batchCount).toBeGreaterThan(1);
+    expect(provider.callCount).toBe(diagnostics.batchCount);
+    expect(diagnostics.chunksSentToProvider).toBe(summary.chunk_count);
+    expect(provider.receivedChunkIndexes).toEqual([...Array(summary.chunk_count).keys()]);
+    // The same two candidates returned per batch are deduped down to two.
+    expect(diagnostics.mode).toBe("provider");
+    expect(drafts).toHaveLength(2);
+    expect(MAX_BATCH_CHARS).toBeGreaterThan(0);
+  });
+
+  it("does not re-suggest memories that are already approved or pending", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+
+    const first = await suggestMemoriesFromSource(summary.id, runtime(root));
+    expect(first.drafts.length).toBeGreaterThan(0);
+    for (const draft of first.drafts) {
+      approveDraft(draft.id, runtime(root));
+    }
+    const approvedCount = listApprovedMemories(runtime(root)).length;
+    expect(approvedCount).toBeGreaterThan(0);
+
+    // Re-running extraction on the same source must skip the now-approved memories.
+    const second = await suggestMemoriesFromSource(summary.id, runtime(root));
+    expect(second.drafts).toHaveLength(0);
+    expect(second.diagnostics.duplicatesSkippedCount).toBeGreaterThan(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(approvedCount);
+  });
+
+  it("passes existing approved and pending memories to the provider", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "zion-skank.md", content: SAMPLE_MARKDOWN },
+      runtime(root)
+    );
+
+    // Create pending drafts deterministically so existing-memory context is non-empty.
+    const first = await suggestMemoriesFromSource(summary.id, runtime(root));
+    expect(first.drafts.length).toBeGreaterThan(0);
+
+    const provider = new FakeExtractionProvider([
+      { content: "James keeps watermarks and logos off the final video frames.", category: "preference", tags: [] }
+    ]);
+    await suggestMemoriesFromSource(summary.id, { ...runtime(root), chatProvider: provider });
+
+    expect(provider.lastInput?.existingMemories?.length).toBeGreaterThan(0);
   });
 });
 
@@ -467,13 +622,37 @@ describe("sources UI memory suggestions", () => {
     expect(listPendingDrafts(runtime(root)).length).toBeGreaterThan(0);
   });
 
+  it("reports that the whole source was reviewed and explains a short count", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/sources/suggest", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ sourceId: String(summary.id), limit: "9" })
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    // The user is told the whole source was reviewed and why fewer than requested appeared.
+    expect(html).toContain("Reviewed");
+    expect(html).toContain("source excerpt");
+    expect(html).toContain("Only");
+  });
+
   it("approves an edited suggestion using the submitted memory text", async () => {
     const root = makeProject();
     const summary = importSource(
       { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
       runtime(root)
     );
-    const drafts = await suggestMemoriesFromSource(summary.id, runtime(root));
+    const { drafts } = await suggestMemoriesFromSource(summary.id, runtime(root));
     const draftId = drafts[0]!.id;
 
     const response = await handleUiRequest(

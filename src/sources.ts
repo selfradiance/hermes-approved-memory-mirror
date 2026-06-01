@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import { openDatabase, tableExists, TABLES } from "./db.js";
-import { createDraftFromProposal } from "./hermes.js";
+import { createDraftFromProposal, listApprovedMemories, listPendingDrafts } from "./hermes.js";
 import { detectCategory, detectTags } from "./draftGeneration.js";
 import { resolveChatModeConfig } from "./llm/chatMode.js";
 import { AnthropicChatProvider } from "./llm/anthropicChatProvider.js";
@@ -13,7 +13,9 @@ import type {
   Source,
   SourceChunk,
   SourceChunkResult,
+  SourceExtractionDiagnostics,
   SourceMemoryCandidate,
+  SourceSuggestionResult,
   SourceSummary
 } from "./types.js";
 
@@ -29,6 +31,14 @@ const MAX_SUGGESTION_LIMIT = 10;
 const MIN_STATEMENT_CHARS = 40;
 const MAX_STATEMENT_CHARS = 320;
 const MIN_STATEMENT_WORDS = 6;
+
+// Full-source extraction budget: chunks are batched so a single provider call
+// stays within a safe input size; larger sources are processed map-reduce style.
+export const MAX_BATCH_CHARS = 24_000;
+const MIN_CANDIDATE_CHARS = 20;
+const MIN_CANDIDATE_WORDS = 4;
+const NEAR_DUPLICATE_JACCARD = 0.8;
+const MAX_EXISTING_MEMORIES_TO_PROVIDER = 60;
 
 // Lines that describe the document itself rather than durable personal context.
 const METADATA_KEYS = new Set([
@@ -266,10 +276,26 @@ export function retrieveRelevantSourceChunks(
   }
 }
 
+interface ExtractionOutcome {
+  candidates: SourceMemoryCandidate[];
+  mode: "provider" | "deterministic";
+  chunksSentToProvider: number;
+  approxCharsSent: number;
+  batchCount: number;
+  providerReturnedCount: number;
+  duplicatesSkippedCount: number;
+}
+
+/**
+ * "Suggest memories from this source" is a full-source extraction workflow: it
+ * reviews every excerpt (not a chat-style top-N retrieval), avoids repeating
+ * memories the user already approved or has pending, and returns up to the
+ * requested number of strong, source-grounded suggestions for human review.
+ */
 export async function suggestMemoriesFromSource(
   sourceId: number,
   options: HermesRuntimeOptions & { limit?: number } = {}
-): Promise<MemoryDraft[]> {
+): Promise<SourceSuggestionResult> {
   const summary = getSource(sourceId, options);
   if (!summary) {
     throw new Error(`Source ${sourceId} was not found.`);
@@ -277,12 +303,33 @@ export async function suggestMemoriesFromSource(
 
   const chunks = getSourceChunks(sourceId, options);
   const limit = clampSuggestionLimit(options.limit);
-  const candidates = await extractSourceMemoryCandidates(summary, chunks, limit, options);
+  const existingMemories = collectExistingMemoryTexts(options);
+
+  const outcome = await extractFullSourceMemories(summary, chunks, limit, existingMemories, options);
 
   const sourceLabel = `source #${summary.id}: ${summary.title}`;
-  return candidates.map((candidate) =>
+  const drafts = outcome.candidates.map((candidate) =>
     createDraftFromProposal(buildProposalFromCandidate(candidate, sourceLabel), options)
   );
+
+  const totalCharCount = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0);
+  const diagnostics: SourceExtractionDiagnostics = {
+    sourceId: summary.id,
+    sourceTitle: summary.title,
+    sourceChunkCount: chunks.length,
+    totalCharCount,
+    chunksSentToProvider: outcome.chunksSentToProvider,
+    approxCharsSent: outcome.approxCharsSent,
+    batchCount: outcome.batchCount,
+    requestedCount: limit,
+    providerReturnedCount: outcome.providerReturnedCount,
+    duplicatesSkippedCount: outcome.duplicatesSkippedCount,
+    finalSuggestionCount: drafts.length,
+    mode: outcome.mode
+  };
+  logExtractionDiagnostics(diagnostics);
+
+  return { drafts, diagnostics };
 }
 
 function clampSuggestionLimit(limit: number | undefined): number {
@@ -290,30 +337,241 @@ function clampSuggestionLimit(limit: number | undefined): number {
   return Math.min(MAX_SUGGESTION_LIMIT, Math.max(MIN_SUGGESTION_LIMIT, requested));
 }
 
-async function extractSourceMemoryCandidates(
+function collectExistingMemoryTexts(options: HermesRuntimeOptions): string[] {
+  const approved = listApprovedMemories(options).map((memory) => memory.content);
+  const pending = listPendingDrafts(options).map((draft) => draft.proposed_content);
+  return [...approved, ...pending].map((text) => text.trim()).filter(Boolean);
+}
+
+async function extractFullSourceMemories(
   summary: SourceSummary,
   chunks: SourceChunk[],
   limit: number,
+  existingMemories: string[],
   options: HermesRuntimeOptions
-): Promise<SourceMemoryCandidate[]> {
+): Promise<ExtractionOutcome> {
   const provider = resolveSourceExtractionProvider(options);
   if (provider?.extractSourceMemories) {
     try {
-      const result = await provider.extractSourceMemories({
-        sourceId: summary.id,
-        sourceTitle: summary.title,
-        chunks: chunks.map((chunk) => ({ chunkIndex: chunk.chunk_index, content: chunk.content })),
-        limit
-      });
-      const sanitized = sanitizeProviderCandidates(result, limit);
-      if (sanitized.length > 0) {
-        return sanitized;
-      }
+      return await extractWithProvider(provider, summary, chunks, limit, existingMemories);
     } catch {
-      // Fall back to deterministic extraction when the provider is unavailable or fails.
+      // A genuine provider failure (network/parse/HTTP) falls back to deterministic
+      // extraction below. A successful-but-empty provider result does NOT fall back.
     }
   }
-  return extractDeterministicSourceMemories(chunks, limit);
+
+  // Pull extra deterministic candidates so dedupe/ranking has material to work with.
+  const rawDeterministic = extractDeterministicSourceMemories(chunks, limit * 3);
+  const { kept, duplicatesSkipped } = finalizeCandidates(rawDeterministic, limit, existingMemories);
+  return {
+    candidates: kept,
+    mode: "deterministic",
+    chunksSentToProvider: 0,
+    approxCharsSent: 0,
+    batchCount: 0,
+    providerReturnedCount: 0,
+    duplicatesSkippedCount: duplicatesSkipped
+  };
+}
+
+async function extractWithProvider(
+  provider: ChatProvider,
+  summary: SourceSummary,
+  chunks: SourceChunk[],
+  limit: number,
+  existingMemories: string[]
+): Promise<ExtractionOutcome> {
+  const batches = batchChunks(chunks, MAX_BATCH_CHARS);
+  const raw: SourceMemoryCandidate[] = [];
+  let chunksSentToProvider = 0;
+  let approxCharsSent = 0;
+
+  for (const batch of batches) {
+    chunksSentToProvider += batch.length;
+    approxCharsSent += batch.reduce((sum, chunk) => sum + chunk.content.length, 0);
+    const result = await provider.extractSourceMemories!({
+      sourceId: summary.id,
+      sourceTitle: summary.title,
+      chunks: batch.map((chunk) => ({ chunkIndex: chunk.chunk_index, content: chunk.content })),
+      limit,
+      existingMemories: existingMemories.slice(0, MAX_EXISTING_MEMORIES_TO_PROVIDER)
+    });
+    if (Array.isArray(result)) {
+      raw.push(...result);
+    }
+  }
+
+  const { kept, duplicatesSkipped } = finalizeCandidates(raw, limit, existingMemories);
+  return {
+    candidates: kept,
+    mode: "provider",
+    chunksSentToProvider,
+    approxCharsSent,
+    batchCount: batches.length,
+    providerReturnedCount: raw.length,
+    duplicatesSkippedCount: duplicatesSkipped
+  };
+}
+
+// Group chunks into batches that stay under the char budget while preserving source order.
+function batchChunks(chunks: SourceChunk[], maxChars: number): SourceChunk[][] {
+  const batches: SourceChunk[][] = [];
+  let current: SourceChunk[] = [];
+  let currentChars = 0;
+
+  for (const chunk of chunks) {
+    const chunkChars = chunk.content.length;
+    if (current.length > 0 && currentChars + chunkChars > maxChars) {
+      batches.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(chunk);
+    currentChars += chunkChars;
+  }
+  if (current.length > 0) {
+    batches.push(current);
+  }
+  return batches;
+}
+
+/**
+ * Validate, deduplicate (against each other AND existing approved/pending
+ * memories), rank by durable-signal strength, and slice to the requested count.
+ */
+function finalizeCandidates(
+  rawCandidates: SourceMemoryCandidate[],
+  limit: number,
+  existingMemories: string[]
+): { kept: SourceMemoryCandidate[]; duplicatesSkipped: number } {
+  const existingNormalized = existingMemories.map(normalizeForCompare).filter(Boolean);
+  const keptNormalized: string[] = [];
+  const scored: Array<{ candidate: SourceMemoryCandidate; score: number; order: number }> = [];
+  let duplicatesSkipped = 0;
+  let order = 0;
+
+  for (const raw of rawCandidates) {
+    const content = (raw?.content ?? "").replace(/\s+/g, " ").trim();
+    if (!content || !isValidCandidateContent(content)) {
+      continue;
+    }
+    const normalized = normalizeForCompare(content);
+    if (isNearDuplicate(normalized, existingNormalized) || isNearDuplicate(normalized, keptNormalized)) {
+      duplicatesSkipped += 1;
+      continue;
+    }
+    keptNormalized.push(normalized);
+    const chunkOrder = candidateOrder(raw.chunkIndexes, order);
+    scored.push({ candidate: sanitizeCandidate(content, raw), score: scoreDurableStatement(content), order: chunkOrder });
+    order += 1;
+  }
+
+  scored.sort((a, b) => b.score - a.score || a.order - b.order);
+  return { kept: scored.slice(0, limit).map((entry) => entry.candidate), duplicatesSkipped };
+}
+
+function candidateOrder(chunkIndexes: number[] | undefined, fallback: number): number {
+  if (Array.isArray(chunkIndexes)) {
+    const valid = chunkIndexes.filter((index) => Number.isInteger(index) && index >= 0);
+    if (valid.length > 0) {
+      return Math.min(...valid);
+    }
+  }
+  return fallback;
+}
+
+function isValidCandidateContent(content: string): boolean {
+  if (content.length < MIN_CANDIDATE_CHARS) {
+    return false;
+  }
+  if (wordCount(content) < MIN_CANDIDATE_WORDS) {
+    return false;
+  }
+  // Reject metadata-only or heading-only lines that are not durable memories.
+  if (isMetadataLine(content)) {
+    return false;
+  }
+  return true;
+}
+
+function sanitizeCandidate(content: string, raw: SourceMemoryCandidate): SourceMemoryCandidate {
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+    : [];
+  const chunkIndexes = Array.isArray(raw.chunkIndexes)
+    ? raw.chunkIndexes.filter((index): index is number => Number.isInteger(index) && index >= 0)
+    : undefined;
+  return {
+    content,
+    category: typeof raw.category === "string" ? raw.category.trim() : "",
+    tags,
+    rationale: typeof raw.rationale === "string" ? raw.rationale.trim() : undefined,
+    chunkIndexes
+  };
+}
+
+function normalizeForCompare(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isNearDuplicate(normalized: string, others: string[]): boolean {
+  if (!normalized) {
+    return false;
+  }
+  const tokens = new Set(normalized.split(" ").filter(Boolean));
+  for (const other of others) {
+    if (!other) {
+      continue;
+    }
+    if (other === normalized || other.includes(normalized) || normalized.includes(other)) {
+      return true;
+    }
+    const otherTokens = new Set(other.split(" ").filter(Boolean));
+    if (jaccardSimilarity(tokens, otherTokens) >= NEAR_DUPLICATE_JACCARD) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) {
+      intersection += 1;
+    }
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function logExtractionDiagnostics(diagnostics: SourceExtractionDiagnostics): void {
+  if (!process.env.HERMES_DEBUG_EXTRACTION) {
+    return;
+  }
+  // Counts and the source title only — never source body content or the API key.
+  const safe = {
+    sourceId: diagnostics.sourceId,
+    title: diagnostics.sourceTitle,
+    chunks: diagnostics.sourceChunkCount,
+    totalChars: diagnostics.totalCharCount,
+    chunksSent: diagnostics.chunksSentToProvider,
+    approxCharsSent: diagnostics.approxCharsSent,
+    batches: diagnostics.batchCount,
+    requested: diagnostics.requestedCount,
+    providerReturned: diagnostics.providerReturnedCount,
+    duplicatesSkipped: diagnostics.duplicatesSkippedCount,
+    final: diagnostics.finalSuggestionCount,
+    mode: diagnostics.mode
+  };
+  process.stderr.write(`[hermes:extraction] ${JSON.stringify(safe)}\n`);
 }
 
 function resolveSourceExtractionProvider(options: HermesRuntimeOptions): ChatProvider | undefined {
@@ -325,42 +583,6 @@ function resolveSourceExtractionProvider(options: HermesRuntimeOptions): ChatPro
     return new AnthropicChatProvider({ apiKey: config.apiKey, model: config.model });
   }
   return undefined;
-}
-
-function sanitizeProviderCandidates(
-  candidates: SourceMemoryCandidate[],
-  limit: number
-): SourceMemoryCandidate[] {
-  const seen = new Set<string>();
-  const sanitized: SourceMemoryCandidate[] = [];
-  for (const candidate of candidates) {
-    const content = (candidate?.content ?? "").replace(/\s+/g, " ").trim();
-    if (!content) {
-      continue;
-    }
-    const key = content.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    const tags = Array.isArray(candidate.tags)
-      ? candidate.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
-      : [];
-    const chunkIndexes = Array.isArray(candidate.chunkIndexes)
-      ? candidate.chunkIndexes.filter((index): index is number => Number.isInteger(index) && index >= 0)
-      : undefined;
-    sanitized.push({
-      content,
-      category: typeof candidate.category === "string" ? candidate.category.trim() : "",
-      tags,
-      rationale: typeof candidate.rationale === "string" ? candidate.rationale.trim() : undefined,
-      chunkIndexes
-    });
-    if (sanitized.length >= limit) {
-      break;
-    }
-  }
-  return sanitized;
 }
 
 export function extractDeterministicSourceMemories(

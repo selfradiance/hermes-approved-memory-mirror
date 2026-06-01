@@ -319,18 +319,13 @@ export async function handleUiRequest(
         "Source id"
       );
       const limit = parseOptionalPositiveInteger(form.get("limit") ?? "");
-      const drafts = await suggestMemoriesFromSource(sourceId, { ...runtime, limit });
+      const { drafts, diagnostics } = await suggestMemoriesFromSource(sourceId, { ...runtime, limit });
       return htmlResponse(
         renderSourcesPage(runtime, {
           selectedSourceId: sourceId,
           notice: {
             kind: drafts.length > 0 ? "success" : "info",
-            message:
-              drafts.length > 0
-                ? `Suggested ${drafts.length} memor${
-                    drafts.length === 1 ? "y" : "ies"
-                  } for review. Approve or edit each one when you’re ready.`
-                : "No durable, standalone statements were found in this source to suggest."
+            message: buildSuggestionNotice(drafts.length, diagnostics.sourceChunkCount, diagnostics.requestedCount)
           }
         })
       );
@@ -1770,6 +1765,23 @@ function parseOptionalPositiveInteger(value: string): number | undefined {
     return undefined;
   }
   return parsePositiveInteger(trimmed, "Value");
+}
+
+// Honest feedback: the whole source was reviewed, and the count is explained
+// rather than silently returning fewer than requested.
+function buildSuggestionNotice(suggestionCount: number, chunkCount: number, requestedCount: number): string {
+  const reviewed = `Reviewed ${chunkCount} source excerpt${chunkCount === 1 ? "" : "s"}.`;
+  if (suggestionCount === 0) {
+    return `${reviewed} No new durable, standalone suggestions were found in this source.`;
+  }
+  const noun = `memor${suggestionCount === 1 ? "y" : "ies"}`;
+  if (suggestionCount < requestedCount) {
+    const verb = suggestionCount === 1 ? "was" : "were";
+    return `${reviewed} Suggested ${suggestionCount} ${noun} for review. Only ${suggestionCount} strong new suggestion${
+      suggestionCount === 1 ? "" : "s"
+    } ${verb} found. Approve or edit each one when you’re ready.`;
+  }
+  return `${reviewed} Suggested ${suggestionCount} ${noun} for review. Approve or edit each one when you’re ready.`;
 }
 
 function parsePositiveInteger(value: string, label: string): number {

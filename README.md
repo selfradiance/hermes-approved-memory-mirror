@@ -158,16 +158,18 @@ In the `Sources` page (linked from the chat header) you can:
 4. View a source's excerpts.
 5. Use **Suggest memories from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it.
 
-### How source memory extraction works (v0.4.1)
+### How source memory extraction works (v0.4.2)
 
-Imported sources are raw material, not memories. **Suggest memories from this source** distills them into durable, standalone suggestions that you must still approve.
+Imported sources are raw material, not memories. **Suggest memories from this source** is a **full-source extraction workflow**: it reviews the whole source (every excerpt, in order), not a chat-style top-N retrieval, and turns it into durable, standalone suggestions that you must still approve.
 
 - **Local mode (default):** a deterministic pass keeps complete, standalone sentences that signal durable personal or project context (stable preferences, recurring principles, long-running projects, identity anchors, decision patterns, creative workflows, finance/Bitcoin thesis, training/health patterns, AI/coding principles). It ignores document metadata such as titles, filenames, creation dates, "purpose" lines, and headings (for example "MASTER IDENTITY DOCUMENT"), and drops tiny fragments.
-- **Claude API mode (optional):** when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set, Claude proposes higher-quality suggestions from the source text. It receives the source excerpts as text only, has no tools, and cannot approve or write memory. If the API is unavailable or returns an unusable response, extraction falls back to the deterministic pass.
+- **Claude API mode (optional):** when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set, Claude proposes higher-quality suggestions from the source text. Small sources are sent in one pass; **large sources are processed in ordered batches (map-reduce): each batch is reviewed, then the candidates are combined, de-duplicated, ranked, and trimmed to the number you asked for.** Claude receives the source excerpts as text only, has no tools, and cannot approve or write memory. If the API is unavailable or returns an unusable response, extraction falls back to the deterministic pass.
 
-Either way, suggestions are saved for review only. Only your explicit approval writes an approved memory. The API key is read from the environment for the single model call and is never stored, logged, rendered, or exported.
+In both modes, suggestions that simply repeat a memory you have **already approved or have pending** are skipped, so the workflow does not re-suggest the same things. When fewer strong suggestions than you requested are found, the UI says so honestly (for example, "Reviewed 42 source excerpts. Suggested 4 memories for review. Only 4 strong new suggestions were found.") rather than silently returning a short list.
 
-When you chat, Approved Mind Mirror may include relevant **source excerpts** alongside **approved memories**. The two are clearly distinguished:
+Either way, suggestions are saved for review only. Only your explicit approval writes an approved memory. The API key is read from the environment for the single model call and is never stored, logged, rendered, or exported. Setting `HERMES_DEBUG_EXTRACTION` prints counts-only diagnostics (chunk/char totals, batches, requested vs. returned vs. saved, mode) to stderr — never source content or the API key.
+
+When you chat, Approved Mind Mirror instead includes only relevant **source excerpts** alongside **approved memories** (chat uses retrieval, not full-source extraction). The two are clearly distinguished:
 
 - "Sources from your memory" are approved memories.
 - "Source excerpts" are raw passages from imported documents, shown as secondary/collapsible reference only.

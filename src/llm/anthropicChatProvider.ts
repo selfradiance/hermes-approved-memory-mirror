@@ -12,6 +12,9 @@ import { ANTHROPIC_LABEL } from "./chatMode.js";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const MAX_TOKENS = 1024;
+// Source extraction returns a JSON array of several memories, so it needs more
+// output headroom than a single chat reply to avoid truncated JSON.
+const EXTRACTION_MAX_TOKENS = 2048;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MEMORY_SUGGESTION_PREFIX = "MEMORY_SUGGESTION:";
 
@@ -29,12 +32,14 @@ export const HERMES_SYSTEM_PROMPT = [
 ].join("\n");
 
 export const SOURCE_EXTRACTION_PROMPT = [
-  "You extract durable, high-value memories from an imported document for a private personal memory mirror.",
-  "Only propose memories worth saving long term: stable preferences, recurring principles, long-running projects, identity anchors, decision patterns, creative workflows, philosophical themes, training/health patterns, finance or Bitcoin thesis, and AI/coding principles.",
-  "Ignore document metadata such as the title, filename, creation date, \"purpose\" lines, and headings (for example \"MASTER IDENTITY DOCUMENT\") unless they state a durable fact.",
-  "Do not summarize the whole document. Do not propose vague fragments. Each suggestion must be a complete, standalone sentence that makes sense on its own.",
-  "Prefer 5 to 10 high-value memories over many weak ones.",
-  "If the source is a conversation or an imported document, phrase suggestions cautiously and do not infer sensitive identity claims beyond what the source clearly states.",
+  "You review an imported document as source material (not as a chat) and extract durable, high-value memories for future conversations with the user.",
+  "Read all of the provided excerpts. Extract the strongest memories worth keeping long term: stable preferences, project direction, identity anchors, recurring principles, workflows, decision patterns, health and training patterns, creative direction, finance or Bitcoin thesis, and AI or coding principles.",
+  "Ignore document metadata such as the title, filename, creation date, \"purpose\" lines, and headings (for example \"MASTER IDENTITY DOCUMENT\") unless the line itself states a durable fact.",
+  "Do not summarize the document. Do not propose vague fragments, bare labels, headings, or trivial facts.",
+  "Do not repeat memories the user already has. Skip anything that duplicates or closely restates a listed existing memory.",
+  "Each suggestion must be a complete, standalone sentence that makes sense on its own.",
+  "Return exactly the requested number of suggestions when there is enough strong material. If there is less, return only the genuinely strong ones rather than padding with weak ones.",
+  "Phrase suggestions cautiously and do not infer sensitive identity claims beyond what the source clearly states.",
   "You have no tools and cannot approve or write memory; a human reviews and approves every suggestion.",
   "Return ONLY a JSON array. Each element is an object with keys: \"content\" (string, required), \"category\" (string), \"tags\" (array of strings), \"rationale\" (short string), and \"chunkIndexes\" (array of integers). Return [] if nothing is worth saving. Output no prose outside the JSON."
 ].join("\n");
@@ -95,22 +100,33 @@ export class AnthropicChatProvider implements ChatProvider {
   }
 
   async extractSourceMemories(input: SourceExtractionInput): Promise<SourceMemoryCandidate[]> {
-    const userContent = [
+    const sections = [
       `Source title: ${input.sourceTitle}`,
-      `Propose at most ${input.limit} memories.`,
-      "Document excerpts:",
-      ...input.chunks.map((chunk) => `[excerpt ${chunk.chunkIndex}] ${chunk.content}`)
-    ].join("\n\n");
+      `Return up to ${input.limit} of the strongest durable memories as a JSON array.`
+    ];
+    if (input.existingMemories && input.existingMemories.length > 0) {
+      sections.push(
+        [
+          "Avoid repeating these existing approved or pending memories (skip near-duplicates):",
+          ...input.existingMemories.map((memory) => `- ${memory}`)
+        ].join("\n")
+      );
+    }
+    sections.push("Document excerpts (in source order):");
+    sections.push(...input.chunks.map((chunk) => `[excerpt ${chunk.chunkIndex}] ${chunk.content}`));
 
-    const rawText = await this.requestText(SOURCE_EXTRACTION_PROMPT, [
-      { role: "user", content: userContent }
-    ]);
+    const rawText = await this.requestText(
+      SOURCE_EXTRACTION_PROMPT,
+      [{ role: "user", content: sections.join("\n\n") }],
+      EXTRACTION_MAX_TOKENS
+    );
     return parseSourceCandidates(rawText, input.limit);
   }
 
   private async requestText(
     system: string,
-    messages: Array<{ role: "user" | "assistant"; content: string }>
+    messages: Array<{ role: "user" | "assistant"; content: string }>,
+    maxTokens: number = MAX_TOKENS
   ): Promise<string> {
     const response = await this.fetchImpl(ANTHROPIC_MESSAGES_URL, {
       method: "POST",
@@ -119,7 +135,7 @@ export class AnthropicChatProvider implements ChatProvider {
         "x-api-key": this.apiKey,
         "anthropic-version": ANTHROPIC_VERSION
       },
-      body: JSON.stringify({ model: this.model, max_tokens: MAX_TOKENS, system, messages }),
+      body: JSON.stringify({ model: this.model, max_tokens: maxTokens, system, messages }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
 

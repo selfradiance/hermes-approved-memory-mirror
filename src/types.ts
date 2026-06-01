@@ -43,6 +43,27 @@ export interface SourceExtractionInput {
   sourceTitle: string;
   chunks: Array<{ chunkIndex: number; content: string }>;
   limit: number;
+  existingMemories?: string[];
+}
+
+export interface SourceExtractionDiagnostics {
+  sourceId: number;
+  sourceTitle: string;
+  sourceChunkCount: number;
+  totalCharCount: number;
+  chunksSentToProvider: number;
+  approxCharsSent: number;
+  batchCount: number;
+  requestedCount: number;
+  providerReturnedCount: number;
+  duplicatesSkippedCount: number;
+  finalSuggestionCount: number;
+  mode: "provider" | "deterministic";
+}
+
+export interface SourceSuggestionResult {
+  drafts: MemoryDraft[];
+  diagnostics: SourceExtractionDiagnostics;
 }
 
 export interface ChatProvider {
