@@ -49,16 +49,46 @@ afterEach(() => {
   }
 });
 
-describe("HERmes Local Review UI", () => {
-  it("can initialize the local database through the UI", async () => {
+describe("HERmes Local Web Chat UI", () => {
+  it("auto-initializes the local database on the home page", async () => {
     const root = makeProject();
 
-    const response = await handleUiRequest(formRequest("/init", {}), runtime(root));
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Local HERmes database initialized.");
+    expect(html).toContain("HERmes");
+    expect(html).toContain("HERmes works best after you add and approve a few memories.");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
+  });
+
+  it("keeps database diagnostics off the default chat page", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).not.toContain("Database path:");
+    expect(html).not.toContain("Tables:");
+    expect(html).not.toContain("memory_entries");
+    expect(html).not.toContain("External connectors/tools configured");
+    expect(html).not.toContain("HERmes posture");
+    expect(html).not.toContain("Initialize Local Database");
+    expect(html).toContain('href="/system"');
+  });
+
+  it("shows technical diagnostics only on the system page", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/system"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Technical Diagnostics");
+    expect(html).toContain("Database path:");
+    expect(html).toContain("Tables:");
+    expect(html).toContain("memory_entries");
   });
 
   it("allows same-origin local POST requests", async () => {
@@ -207,7 +237,7 @@ describe("HERmes Local Review UI", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("HERmes");
-    expect(html).toContain("Memories used:");
+    expect(html).toContain("Sources from your memory");
     expect(html).toContain(`[${memory.id}]`);
     expect(html).toContain("Seedance storyboard ideas");
     expect(session).toBeDefined();

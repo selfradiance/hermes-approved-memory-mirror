@@ -11,6 +11,7 @@ import {
 import {
   approveDraft,
   doctor,
+  ensureHermesInitialized,
   exportApprovedMemories,
   initHermes,
   intakeText,
@@ -82,8 +83,14 @@ export async function handleUiRequest(
   }
 
   try {
+    ensureHermesInitialized(runtime);
+
     if (request.method === "GET" && url.pathname === "/") {
       return htmlResponse(renderPage(runtime));
+    }
+
+    if (request.method === "GET" && url.pathname === "/system") {
+      return htmlResponse(renderSystemPage(runtime));
     }
 
     if (request.method === "POST" && url.pathname === "/chat/send") {
@@ -122,7 +129,7 @@ export async function handleUiRequest(
     if (request.method === "GET" && url.pathname === "/memories") {
       const searchQuery = (url.searchParams.get("query") ?? "").trim();
       const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
-      return htmlResponse(renderPage(runtime, { searchQuery, searchResults }));
+      return htmlResponse(renderSystemPage(runtime, { searchQuery, searchResults }));
     }
 
     if (request.method === "POST" && url.pathname === "/init") {
@@ -176,13 +183,13 @@ export async function handleUiRequest(
       const form = await readForm(request);
       const question = requiredFormValue(form, "question", "Reflection question is required.");
       const reflection = reflectOnApprovedMemory(question, runtime);
-      return htmlResponse(renderPage(runtime, { reflection }));
+      return htmlResponse(renderSystemPage(runtime, { reflection }));
     }
 
     if (request.method === "POST" && url.pathname === "/export") {
       const exportPath = exportApprovedMemories(runtime);
       return htmlResponse(
-        renderPage(runtime, {
+        renderSystemPage(runtime, {
           exportPath,
           notice: { kind: "success", message: "Approved memories exported locally." }
         })
@@ -225,27 +232,27 @@ export async function startUiServer(options: UiServerOptions = {}): Promise<Star
 
 function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): string {
   const model = readUiModel(runtime, state);
-  const statusClass = model.report.dbExists ? "status-ok" : "status-warn";
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HERmes Local Web Chat</title>
+  <title>HERmes</title>
   <style>
     :root {
       color-scheme: light;
-      --ink: #18211f;
-      --muted: #5f6b67;
-      --line: #d7dfdc;
-      --paper: #f7f9f7;
+      --ink: #17201e;
+      --muted: #66736f;
+      --line: #d9e1de;
+      --paper: #f6f8f7;
       --panel: #ffffff;
-      --accent: #216b57;
-      --accent-strong: #174b3e;
+      --soft: #eef6f3;
+      --accent: #236b58;
+      --accent-strong: #174d3f;
+      --blue: #2a5d84;
       --warn: #8a5a17;
       --danger: #a43a32;
-      --blue: #245c85;
     }
     * {
       box-sizing: border-box;
@@ -258,62 +265,67 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       font-size: 16px;
       line-height: 1.45;
     }
-    header {
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-    }
-    .wrap {
-      width: min(1120px, calc(100% - 32px));
+    .app-shell {
+      width: min(880px, calc(100% - 32px));
       margin: 0 auto;
+      padding: 22px 0 42px;
     }
-    .topbar {
+    .app-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 20px;
-      padding: 22px 0;
+      margin-bottom: 18px;
     }
     h1 {
       margin: 0;
-      font-size: 1.6rem;
+      font-size: 1.75rem;
       letter-spacing: 0;
     }
-    .subtitle {
-      margin: 4px 0 0;
+    .tagline {
+      margin: 5px 0 0;
       color: var(--muted);
-      max-width: 720px;
+      font-size: 0.96rem;
     }
-    nav {
+    .top-actions,
+    .actions,
+    .chat-toolbar {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
+      align-items: center;
     }
-    nav a {
+    .top-actions a,
+    .link-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
       color: var(--accent-strong);
       border: 1px solid var(--line);
       border-radius: 6px;
-      padding: 7px 10px;
+      padding: 8px 11px;
       text-decoration: none;
       background: #fbfcfb;
       font-size: 0.94rem;
     }
-    main {
-      display: grid;
-      gap: 22px;
-      padding: 24px 0 42px;
-    }
-    section {
+    .chat-card,
+    .panel {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 20px;
+      padding: 18px;
     }
-    .section-head {
+    .chat-card {
+      display: grid;
+      gap: 16px;
+      min-height: calc(100vh - 190px);
+    }
+    .chat-head {
       display: flex;
-      align-items: start;
+      align-items: center;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 14px;
     }
     h2 {
       margin: 0;
@@ -324,11 +336,6 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       color: var(--muted);
       margin: 4px 0 0;
       font-size: 0.95rem;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
     }
     .stack {
       display: grid;
@@ -351,12 +358,6 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       color: var(--blue);
       border-color: #c8d9e7;
     }
-    .status-line {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 0 0 12px;
-    }
     .pill {
       display: inline-flex;
       align-items: center;
@@ -367,16 +368,6 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       color: var(--muted);
       background: #fbfcfb;
       font-size: 0.9rem;
-    }
-    .status-ok {
-      color: var(--accent-strong);
-      border-color: #b7d7cc;
-      background: #eff8f4;
-    }
-    .status-warn {
-      color: var(--warn);
-      border-color: #e6d1a8;
-      background: #fff8e8;
     }
     label {
       display: grid;
@@ -421,12 +412,6 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
     }
     button.danger {
       background: var(--danger);
-    }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
     }
     .item {
       border-top: 1px solid var(--line);
@@ -481,8 +466,8 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
     .chat-thread {
       display: grid;
       gap: 12px;
-      min-height: 280px;
-      max-height: 58vh;
+      align-content: start;
+      min-height: 320px;
       overflow-y: auto;
       padding: 6px 2px;
     }
@@ -495,7 +480,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
     }
     .chat-message.user {
       justify-self: end;
-      background: #eef8f4;
+      background: var(--soft);
       border-color: #b7d7cc;
     }
     .chat-message.hermes {
@@ -524,8 +509,17 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       color: var(--muted);
       font-size: 0.93rem;
     }
-    .memory-sources p {
+    .memory-sources summary {
+      cursor: pointer;
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+    .memory-sources p,
+    .memory-sources ul {
       margin: 0;
+    }
+    .memory-sources ul {
+      padding-left: 18px;
     }
     .chat-compose {
       display: grid;
@@ -535,26 +529,46 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       min-height: 92px;
     }
     .chat-toolbar {
-      display: flex;
-      flex-wrap: wrap;
       justify-content: space-between;
+    }
+    .memory-panels {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    details.panel > summary {
+      cursor: pointer;
+      font-weight: 750;
+      color: var(--accent-strong);
+    }
+    details.panel > .panel-body {
+      margin-top: 14px;
+    }
+    .onboarding {
+      border: 1px solid #c8d9e7;
+      background: #eef5fb;
+      border-radius: 8px;
+      padding: 14px;
+      display: grid;
       gap: 10px;
-      align-items: center;
+    }
+    .onboarding p {
+      margin: 0;
     }
     button:disabled {
       cursor: not-allowed;
       opacity: 0.55;
     }
     @media (max-width: 760px) {
-      .topbar,
-      .section-head {
+      .app-header,
+      .chat-head {
         display: grid;
       }
-      .grid,
       .search-row {
         grid-template-columns: 1fr;
       }
-      nav a,
+      .top-actions a,
+      .link-button,
       button {
         width: 100%;
         text-align: center;
@@ -563,137 +577,341 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
   </style>
 </head>
 <body>
-  <header>
-    <div class="wrap topbar">
+  <main class="app-shell">
+    <header class="app-header">
       <div>
-        <h1>HERmes Local Web Chat</h1>
-        <p class="subtitle">A private local chat and review interface over approved memory. No external calls, no tools, no autonomous actions.</p>
+        <h1>HERmes</h1>
+        <p class="tagline">Your memories stay local. Only approved memories are used. No outside actions.</p>
       </div>
-      <nav aria-label="Sections">
-        <a href="#chat">Chat</a>
-        <a href="#status">Status</a>
-        <a href="#review">Review</a>
-        <a href="#add-note">Add Note</a>
-        <a href="#memories">Memories</a>
-        <a href="#reflect">Reflect</a>
-        <a href="#export">Export</a>
+      <nav class="top-actions" aria-label="App actions">
+        <a href="#review-drafts">Review drafts${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
+        <a href="#add-memory">Add memory</a>
+        <a href="/system">System</a>
       </nav>
-    </div>
-  </header>
-  <main class="wrap">
+    </header>
+
     ${state.notice ? renderNotice(state.notice) : ""}
-    <section id="chat">
-      <div class="section-head">
+
+    <section class="chat-card" id="chat">
+      <div class="chat-head">
         <div>
           <h2>Chat</h2>
-          <p class="hint">A local deterministic idea mirror. Responses use approved memory only and never approve memory automatically.</p>
+          <p class="hint">${model.approvedMemories.length} approved ${
+            model.approvedMemories.length === 1 ? "memory" : "memories"
+          }</p>
         </div>
         <form method="post" action="/chat/new">
           <button class="secondary" type="submit"${model.canReadMemory ? "" : " disabled"}>New Chat</button>
         </form>
       </div>
+      ${
+        model.approvedMemories.length === 0
+          ? `<div class="onboarding">
+              <p>HERmes works best after you add and approve a few memories.</p>
+              <a class="link-button" href="#add-memory">Add memory</a>
+            </div>`
+          : ""
+      }
       ${renderChat(model)}
     </section>
 
-    <section id="status">
-      <div class="section-head">
-        <div>
-          <h2>Status</h2>
-          <p class="hint">Only approved memories are used for list/search/reflect/chat.</p>
+    <div class="memory-panels">
+      <details class="panel" id="add-memory"${model.approvedMemories.length === 0 ? " open" : ""}>
+        <summary>Add memory</summary>
+        <div class="panel-body">
+          <form class="stack" method="post" action="/drafts">
+            <label>
+              Paste a note
+              <textarea name="text" required placeholder="Paste something HERmes should remember after you approve it."></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit">Create draft</button>
+            </div>
+          </form>
         </div>
-        <form method="post" action="/init">
-          <button class="secondary" type="submit">Initialize Local Database</button>
-        </form>
-      </div>
-      <div class="status-line">
-        <span class="pill ${statusClass}">Database ${model.report.dbExists ? "ready" : "not initialized"}</span>
-        <span class="pill">Pending drafts: ${model.report.pendingDraftCount}</span>
-        <span class="pill">Approved memories: ${model.report.approvedMemoryCount}</span>
-        <span class="pill">Local-only</span>
-        <span class="pill">No LLM/API/connectors</span>
-      </div>
-      <pre>${escapeHtml(formatDoctor(model.report))}</pre>
-    </section>
+      </details>
 
-    <section id="add-note">
-      <div class="section-head">
-        <div>
-          <h2>Add Note</h2>
-          <p class="hint">Creates a pending draft. It does not approve memory automatically.</p>
+      <details class="panel" id="review-drafts"${model.pendingDrafts.length > 0 ? " open" : ""}>
+        <summary>Review drafts${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</summary>
+        <div class="panel-body">
+          ${renderDrafts(model.pendingDrafts)}
         </div>
-      </div>
-      <form class="stack" method="post" action="/drafts">
-        <label>
-          Note text
-          <textarea name="text" required placeholder="Paste or type a note for HERmes to turn into a draft."></textarea>
-        </label>
-        <div class="actions">
-          <button type="submit">Create Draft</button>
-        </div>
-      </form>
-    </section>
-
-    <section id="review">
-      <div class="section-head">
-        <div>
-          <h2>Review Drafts</h2>
-          <p class="hint">Approval creates memory. Rejection does not create memory.</p>
-        </div>
-      </div>
-      ${renderDrafts(model.pendingDrafts)}
-    </section>
-
-    <section id="memories">
-      <div class="section-head">
-        <div>
-          <h2>Approved Memories</h2>
-          <p class="hint">Empty search shows approved memories. Rejected drafts are not shown as memories.</p>
-        </div>
-      </div>
-      <form class="search-row" method="get" action="/memories">
-        <label>
-          Search approved memory
-          <input type="search" name="query" value="${escapeAttribute(model.searchQuery)}" placeholder="Search text, tags, category, or source">
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      <div class="stack" style="margin-top: 16px;">
-        ${renderMemoryResults(model)}
-      </div>
-    </section>
-
-    <section id="reflect">
-      <div class="section-head">
-        <div>
-          <h2>Reflect</h2>
-          <p class="hint">Deterministic reflection from approved memories only. No LLM wording.</p>
-        </div>
-      </div>
-      <form class="stack" method="post" action="/reflect">
-        <label>
-          Question
-          <input type="text" name="question" required placeholder="What should I remember about this pattern?">
-        </label>
-        <div class="actions">
-          <button type="submit">Reflect</button>
-        </div>
-      </form>
-      ${state.reflection ? renderReflection(state.reflection) : ""}
-    </section>
-
-    <section id="export">
-      <div class="section-head">
-        <div>
-          <h2>Export</h2>
-          <p class="hint">Writes approved memory JSON locally under .hermes/export. Nothing is uploaded.</p>
-        </div>
-      </div>
-      <form method="post" action="/export">
-        <button type="submit">Export JSON</button>
-      </form>
-      ${state.exportPath ? `<p class="notice info" style="margin-top: 14px;">Export path: ${escapeHtml(state.exportPath)}</p>` : ""}
-    </section>
+      </details>
+    </div>
   </main>
+</body>
+</html>`;
+}
+
+function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}): string {
+  const model = readUiModel(runtime, state);
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HERmes System</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17201e;
+      --muted: #66736f;
+      --line: #d9e1de;
+      --paper: #f6f8f7;
+      --panel: #ffffff;
+      --accent: #236b58;
+      --accent-strong: #174d3f;
+      --danger: #a43a32;
+      --blue: #2a5d84;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .wrap {
+      width: min(960px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 42px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    h1,
+    h2 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+    h1 {
+      font-size: 1.55rem;
+    }
+    h2 {
+      font-size: 1.08rem;
+    }
+    a {
+      color: var(--accent-strong);
+    }
+    .back-link,
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      border-radius: 6px;
+      padding: 8px 11px;
+      font: inherit;
+      font-weight: 700;
+    }
+    .back-link {
+      border: 1px solid var(--line);
+      background: #fbfcfb;
+      text-decoration: none;
+    }
+    button {
+      border: 0;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    button.secondary {
+      color: var(--accent-strong);
+      border: 1px solid var(--line);
+      background: #fbfcfb;
+    }
+    button.danger {
+      background: var(--danger);
+    }
+    main,
+    .stack {
+      display: grid;
+      gap: 14px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .hint,
+    .meta,
+    .empty {
+      color: var(--muted);
+    }
+    .hint {
+      margin: 4px 0 0;
+    }
+    .notice {
+      border-radius: 8px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      background: #eef8f4;
+      color: var(--accent-strong);
+    }
+    .notice.error {
+      background: #fff2f1;
+      color: var(--danger);
+      border-color: #e8c6c2;
+    }
+    .notice.info {
+      background: #eef5fb;
+      color: var(--blue);
+      border-color: #c8d9e7;
+    }
+    .search-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+    }
+    label {
+      display: grid;
+      gap: 7px;
+      font-weight: 650;
+    }
+    textarea,
+    input[type="search"],
+    input[type="text"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 11px 12px;
+      color: var(--ink);
+      background: #fff;
+      font: inherit;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    pre {
+      overflow-x: auto;
+      margin: 0;
+      padding: 12px;
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      background: #fbfcfb;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .item {
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+    .item:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .item-title {
+      margin: 0 0 6px;
+      font-weight: 750;
+    }
+    .content {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      margin: 0;
+    }
+    @media (max-width: 760px) {
+      header,
+      .search-row {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+      button,
+      .back-link {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>System</h1>
+        <p class="hint">Diagnostics and advanced local tools.</p>
+      </div>
+      <a class="back-link" href="/">Back to chat</a>
+    </header>
+    <main>
+      ${state.notice ? renderNotice(state.notice) : ""}
+      <section>
+        <h2>Memory</h2>
+        <p class="hint">Your memories stay local. Only approved memories are used. No outside actions.</p>
+        <p>Approved memories: ${model.approvedMemories.length} · Drafts waiting for review: ${
+          model.pendingDrafts.length
+        }</p>
+      </section>
+
+      <section>
+        <h2>Review Drafts</h2>
+        <div class="stack" style="margin-top: 12px;">
+          ${renderDrafts(model.pendingDrafts)}
+        </div>
+      </section>
+
+      <section>
+        <h2>Search Memories</h2>
+        <form class="search-row" method="get" action="/memories" style="margin-top: 12px;">
+          <label>
+            Search approved memory
+            <input type="search" name="query" value="${escapeAttribute(
+              model.searchQuery
+            )}" placeholder="Search text, tags, category, or source">
+          </label>
+          <button type="submit">Search</button>
+        </form>
+        <div class="stack" style="margin-top: 16px;">
+          ${renderMemoryResults(model)}
+        </div>
+      </section>
+
+      <section>
+        <h2>Reflect</h2>
+        <form class="stack" method="post" action="/reflect" style="margin-top: 12px;">
+          <label>
+            Question
+            <input type="text" name="question" required placeholder="What should I remember about this pattern?">
+          </label>
+          <div class="actions">
+            <button type="submit">Reflect</button>
+          </div>
+        </form>
+        ${state.reflection ? renderReflection(state.reflection) : ""}
+      </section>
+
+      <section>
+        <h2>Export</h2>
+        <p class="hint">Writes approved memory JSON locally under .hermes/export. Nothing is uploaded.</p>
+        <form method="post" action="/export" style="margin-top: 12px;">
+          <button type="submit">Export JSON</button>
+        </form>
+        ${state.exportPath ? `<p class="notice info" style="margin-top: 14px;">Export path: ${escapeHtml(state.exportPath)}</p>` : ""}
+      </section>
+
+      <section>
+        <h2>Technical Diagnostics</h2>
+        <p class="hint">Useful for debugging local setup.</p>
+        <pre style="margin-top: 12px;">${escapeHtml(formatDoctor(model.report))}</pre>
+      </section>
+    </main>
+  </div>
 </body>
 </html>`;
 }
@@ -757,8 +975,8 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         </div>
         <p class="hint">${
           model.canReadMemory
-            ? "Chat is saved locally in SQLite. Saving an exchange creates a draft only."
-            : "Initialize the local database before chatting."
+            ? "Saving an exchange creates a draft only."
+            : "HERmes could not open your local memory store."
         }</p>
       </div>
     </form>
@@ -795,9 +1013,9 @@ function renderLatestMemorySources(
   sources: UiMemorySource[]
 ): string {
   if (!latestHermesMessage) {
-    return `<div class="memory-sources"><p>Latest memories used: no HERmes response yet.</p></div>`;
+    return `<div class="memory-sources"><p>Sources from your memory: none yet.</p></div>`;
   }
-  return renderMemorySources(sources, "Latest memories used: none.");
+  return renderMemorySources(sources, "No approved memories were used for the latest response.");
 }
 
 function renderMemorySources(sources: UiMemorySource[], emptyText: string): string {
@@ -805,10 +1023,12 @@ function renderMemorySources(sources: UiMemorySource[], emptyText: string): stri
     return `<div class="memory-sources"><p>${escapeHtml(emptyText)}</p></div>`;
   }
 
-  return `<div class="memory-sources">
-    <p>Memories used:</p>
-    ${sources.map((source) => `<p>- [${source.id}] ${escapeHtml(source.snippet)}</p>`).join("")}
-  </div>`;
+  return `<details class="memory-sources">
+    <summary>Sources from your memory</summary>
+    <ul>
+      ${sources.map((source) => `<li>[${source.id}] ${escapeHtml(source.snippet)}</li>`).join("")}
+    </ul>
+  </details>`;
 }
 
 function renderNotice(notice: Notice): string {
@@ -827,10 +1047,10 @@ function renderDrafts(drafts: MemoryDraft[]): string {
 
 function renderDraft(draft: MemoryDraft): string {
   return `<article class="item">
-    <p class="item-title"><span>[${draft.id}] ${escapeHtml(draft.proposed_category)}</span></p>
-    <p class="meta">Tags: ${escapeHtml(formatTags(draft.proposed_tags_json))} · Confidence: ${escapeHtml(
-      draft.proposed_confidence
-    )} · Source: ${escapeHtml(draft.source_type)} ${escapeHtml(draft.source_label)}</p>
+    <p class="item-title"><span>Draft ${draft.id}</span></p>
+    <p class="meta">Suggested as ${escapeHtml(draft.proposed_category)} · Tags: ${escapeHtml(
+      formatTags(draft.proposed_tags_json)
+    )}</p>
     <p class="content">${escapeHtml(draft.proposed_content)}</p>
     <div class="actions" style="margin-top: 12px;">
       <form method="post" action="/drafts/approve">

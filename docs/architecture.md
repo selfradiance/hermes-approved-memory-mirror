@@ -1,6 +1,6 @@
 # Architecture
 
-HERmes v0.2.1 is a local approved-memory mirror with a localhost-only web chat UI, a small SQLite-backed service layer, and an advanced CLI. The browser UI is local-only; it is not an external web app and does not add automation capabilities.
+HERmes v0.2.2 is a local approved-memory mirror with a localhost-only web chat UI, a small SQLite-backed service layer, and an advanced CLI. The browser UI is local-only; it is not an external web app and does not add automation capabilities.
 
 ## Components
 
@@ -24,9 +24,11 @@ HERmes v0.2.1 is a local approved-memory mirror with a localhost-only web chat U
 
 ## Local UI Server
 
-`src/ui.ts` starts a Node HTTP server bound to loopback by default at `127.0.0.1:8787`. It refuses non-loopback hosts and rejects non-local/cross-site state-changing requests.
+`src/ui.ts` starts a Node HTTP server bound to loopback by default at `127.0.0.1:8787`. It refuses non-loopback hosts and rejects non-local/cross-site state-changing requests. The UI ensures the local SQLite schema exists on first request, so normal use does not require an initialization button.
 
-The server renders a simple chat-first page with chat history, message input, HERmes responses, memory sources used, save-as-draft, pending draft review, approved-memory search, deterministic reflection, and local JSON export. It calls the existing service functions directly and does not introduce LLM/API calls, external connectors, MCP, browser automation, shell execution, scheduler, daemon, subagents, account access, or autonomous actions.
+The default page is intentionally chat-first: app name, chat history, message input, HERmes responses, subtle memory sources, save-as-draft, add-memory, and review-drafts. Technical diagnostics, database path, table status, approved-memory search, deterministic reflection, and local JSON export live behind `/system`.
+
+The server calls the existing service functions directly and does not introduce LLM/API calls, external connectors, MCP, browser automation, shell execution, scheduler, daemon, subagents, account access, or autonomous actions.
 
 ## Storage
 

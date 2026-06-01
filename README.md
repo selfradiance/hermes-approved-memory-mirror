@@ -74,9 +74,11 @@ In the UI:
 3. Save the latest exchange as a pending draft.
 4. Review pending drafts and approve or reject them.
 5. Add notes as pending drafts.
-6. Search approved memories, ask deterministic reflection questions, or export approved memory JSON locally.
+6. Open `System` only when you want diagnostics, search, deterministic reflection, or local JSON export.
 
 Only approved memories are used for chat/list/search/reflect. Saving a chat exchange creates a pending draft only; it does not approve memory.
+
+HERmes initializes its local memory store automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics.
 
 What the UI cannot do:
 

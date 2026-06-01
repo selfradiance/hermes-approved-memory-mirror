@@ -51,6 +51,17 @@ export function initHermes(options: HermesRuntimeOptions = {}): HermesPaths {
   return paths;
 }
 
+export function ensureHermesInitialized(options: HermesRuntimeOptions = {}): HermesPaths {
+  const paths = resolveHermesPaths(options);
+  const db = openDatabase(options, "create");
+  try {
+    initializeSchema(db);
+  } finally {
+    db.close();
+  }
+  return paths;
+}
+
 export function intakeText(text: string, options: HermesRuntimeOptions = {}): MemoryDraft[] {
   const proposal = createDraftProposalFromText(text, "manual_text", "cli --text");
   return insertDraftProposals([proposal], options);
