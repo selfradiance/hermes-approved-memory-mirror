@@ -1,6 +1,6 @@
 # HERmes — Approved Memory Mirror
 
-HERmes is a tiny local TypeScript/Node memory mirror for James. It has a CLI and a localhost-only Local Review UI for adding notes, reviewing proposed memory drafts, approving or rejecting them, searching approved memory, and generating deterministic reflection output from approved memory.
+HERmes is a tiny local TypeScript/Node memory mirror for James. It has a CLI, a terminal chat mirror, and a localhost-only Local Review UI for adding notes, reviewing proposed memory drafts, approving or rejecting them, searching approved memory, and generating deterministic reflection output from approved memory.
 
 HERmes stores only human-approved memories. Intake creates drafts. Drafts are not memory.
 
@@ -78,9 +78,56 @@ npx tsx src/cli.ts reject 2 --note "Not useful."
 npx tsx src/cli.ts list
 npx tsx src/cli.ts search "Seedance"
 npx tsx src/cli.ts reflect "What video workflow should I reuse for Zion Skank?"
+npx tsx src/cli.ts chat
 npx tsx src/cli.ts export --json
 npx tsx src/cli.ts doctor
 ```
+
+## v0.2 Conversational Idea Mirror
+
+`hermes chat` opens a simple local terminal chat loop. You can type natural messages, and HERmes retrieves relevant approved memories, generates a deterministic reflection or idea response, and prints a short `Memories used` section after each answer.
+
+Inside chat:
+
+```text
+/help        show commands
+/exit        leave chat
+/memories    show memories used in the latest response
+/save-draft  save the latest user+HERmes exchange as a pending draft
+```
+
+`/save-draft` never creates approved memory. It creates a pending draft with source `chat`, and the existing review/approve flow remains the only way to turn that draft into approved memory.
+
+When you ask for ideas, possibilities, directions, creative sparks, project ideas, content ideas, or "what does this make you think of", HERmes switches into idea mode. It returns 3 to 5 deterministic idea candidates, why each fits, which approved memory IDs inspired it, and the smallest next artifact for each idea.
+
+Example:
+
+```text
+$ hermes chat
+HERmes chat is local and deterministic. Type /help for commands or /exit to leave.
+you> What does this make you think of for Zion Skank?
+HERmes:
+Here are 3 deterministic idea candidates grounded in approved memory.
+
+1. Tiny brief: Zion Skank through Seedance
+Why it fits: Memory [1] says Zion Skank uses Seedance shot-by-shot prompts..., giving this idea a known local anchor.
+Inspired by memories: 1
+Smallest next artifact: a six-line brief with goal, audience, constraint, tone, shape, and open question
+
+Memories used:
+- [1] Zion Skank uses Seedance shot-by-shot prompts...
+you> /save-draft
+Created pending draft 2. Review and approve it separately if it should become memory.
+```
+
+What chat does not do:
+
+- No LLM/API/provider calls.
+- No tools, shell execution, browser automation, MCP, connectors, schedulers, daemons, subagents, or account access.
+- No autonomous actions.
+- No automatic approved-memory writes.
+- No filesystem crawl; chat uses approved memory already in SQLite.
+- No writes outside `.hermes/`; chat sessions and messages are stored in local SQLite tables.
 
 ## Demo
 
@@ -100,13 +147,15 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 `memory_events` stores audit events for draft creation, approval, rejection, memory creation, and export.
 
+`chat_sessions` and `chat_messages` store local terminal chat history. HERmes messages record the approved memory IDs used for each response.
+
 ## Human Approval Flow
 
 1. `intake` creates one or more pending drafts.
 2. `review` shows pending drafts.
 3. `approve <draft-id>` writes an approved memory entry and audit events.
 4. `reject <draft-id>` marks a draft rejected and writes an audit event.
-5. `search`, `list`, `reflect`, and `export` use approved memory only.
+5. `search`, `list`, `reflect`, `chat`, and `export` use approved memory only.
 
 ## Future LLM Provider Interface
 

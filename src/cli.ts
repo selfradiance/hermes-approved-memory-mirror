@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
+import type { Readable, Writable } from "node:stream";
+import {
+  createChatSession,
+  formatMemoriesUsed,
+  saveLatestChatExchangeDraft,
+  sendChatMessage
+} from "./chat.js";
 import {
   approveDraft,
   doctor,
@@ -23,10 +31,13 @@ import {
   formatSearchResults
 } from "./format.js";
 import type { HermesRuntimeOptions } from "./types.js";
+import type { ChatTurn } from "./types.js";
 
 export interface CliRuntimeOptions extends HermesRuntimeOptions {
   writeOut?: (message: string) => void;
   writeErr?: (message: string) => void;
+  readIn?: Readable;
+  readOut?: Writable;
 }
 
 export function createProgram(runtime: CliRuntimeOptions = {}): Command {
@@ -36,7 +47,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.1.0");
+    .version("0.2.0");
 
   program
     .command("init")
@@ -115,6 +126,13 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
     });
 
   program
+    .command("chat")
+    .description("Open a local deterministic terminal chat mirror")
+    .action(async () => {
+      await runChatLoop(runtime);
+    });
+
+  program
     .command("export")
     .description("Export approved memories and events")
     .option("--json", "write JSON export")
@@ -133,6 +151,74 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
     });
 
   return program;
+}
+
+async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
+  const out = (message: string) => (runtime.writeOut ?? process.stdout.write.bind(process.stdout))(`${message}\n`);
+  const rl = readline.createInterface({
+    input: runtime.readIn ?? process.stdin,
+    output: runtime.readOut ?? process.stdout,
+    prompt: "you> "
+  });
+  let session = createChatSession(runtime, "Interactive chat");
+  let latestTurn: ChatTurn | undefined;
+
+  out("HERmes chat is local and deterministic. Type /help for commands or /exit to leave.");
+  rl.prompt();
+
+  try {
+    for await (const inputLine of rl) {
+      const line = inputLine.trim();
+      if (!line) {
+        rl.prompt();
+        continue;
+      }
+
+      if (line === "/exit" || line === "/quit") {
+        out("Goodbye.");
+        break;
+      }
+
+      if (line === "/help") {
+        out(
+          [
+            "Commands:",
+            "/help - show chat commands",
+            "/exit - leave chat",
+            "/memories - show memories used in the latest response",
+            "/save-draft - save the latest user+HERmes exchange as a pending draft"
+          ].join("\n")
+        );
+        rl.prompt();
+        continue;
+      }
+
+      if (line === "/memories") {
+        out(latestTurn ? formatMemoriesUsed(latestTurn.response.memoriesUsed) : "No response has used memories yet.");
+        rl.prompt();
+        continue;
+      }
+
+      if (line === "/save-draft") {
+        if (!latestTurn) {
+          out("No exchange is available to save yet.");
+          rl.prompt();
+          continue;
+        }
+        const draft = saveLatestChatExchangeDraft(session.id, runtime);
+        out(`Created pending draft ${draft.id}. Review and approve it separately if it should become memory.`);
+        rl.prompt();
+        continue;
+      }
+
+      latestTurn = sendChatMessage(line, { ...runtime, sessionId: session.id });
+      session = latestTurn.session;
+      out(`HERmes:\n${latestTurn.hermesMessage.content}`);
+      rl.prompt();
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 export async function runCli(argv: string[] = process.argv.slice(2), runtime: CliRuntimeOptions = {}): Promise<void> {

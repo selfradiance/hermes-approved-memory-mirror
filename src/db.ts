@@ -3,7 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { HermesPaths, HermesRuntimeOptions } from "./types.js";
 
-export const TABLES = ["memory_entries", "memory_drafts", "memory_events"] as const;
+export const TABLES = [
+  "memory_entries",
+  "memory_drafts",
+  "memory_events",
+  "chat_sessions",
+  "chat_messages"
+] as const;
 
 const DB_FILE_RE = /^[A-Za-z0-9._-]+\.db$/;
 
@@ -84,11 +90,28 @@ export function initializeSchema(db: Database.Database): void {
       details_json TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      title TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'hermes')),
+      content TEXT NOT NULL,
+      memory_ids_json TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_memory_entries_status ON memory_entries(status);
     CREATE INDEX IF NOT EXISTS idx_memory_entries_source ON memory_entries(source_type, source_label);
     CREATE INDEX IF NOT EXISTS idx_memory_drafts_status ON memory_drafts(status);
     CREATE INDEX IF NOT EXISTS idx_memory_events_memory_id ON memory_events(memory_id);
     CREATE INDEX IF NOT EXISTS idx_memory_events_draft_id ON memory_events(draft_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id, id);
   `);
 }
 

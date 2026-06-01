@@ -56,6 +56,20 @@ export function intakeText(text: string, options: HermesRuntimeOptions = {}): Me
   return insertDraftProposals([proposal], options);
 }
 
+export function createDraftFromText(
+  text: string,
+  sourceType: string,
+  sourceLabel: string,
+  options: HermesRuntimeOptions = {}
+): MemoryDraft {
+  const proposal = createDraftProposalFromText(text, sourceType, sourceLabel);
+  const [draft] = insertDraftProposals([proposal], options);
+  if (!draft) {
+    throw new Error("Expected draft creation to return one pending draft.");
+  }
+  return draft;
+}
+
 export function intakeFile(
   filePath: string,
   options: HermesRuntimeOptions & { allowExternalFile?: boolean } = {}
@@ -227,7 +241,7 @@ export function reflectOnApprovedMemory(
     throw new Error("Reflection question is required.");
   }
 
-  const relevant = findRelevantApprovedMemories(normalized, options).slice(0, 5);
+  const relevant = retrieveRelevantApprovedMemories(normalized, options).slice(0, 5);
   const categories = countValues(relevant.map(({ memory }) => memory.category));
   const tags = countValues(
     relevant.flatMap(({ memory }) => parseTags(memory.tags_json)).filter((tag) => tag.length > 0)
@@ -343,6 +357,41 @@ export function listMemoryEvents(options: HermesRuntimeOptions = {}): MemoryEven
   }
 }
 
+export function retrieveRelevantApprovedMemories(
+  question: string,
+  options: HermesRuntimeOptions & { limit?: number } = {}
+): SearchResult[] {
+  const terms = extractSearchTerms(question);
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const memories = listApprovedMemories(options);
+  const scored = memories
+    .map((memory) => {
+      const haystack = [
+        memory.content,
+        memory.category,
+        memory.tags_json,
+        memory.source_type,
+        memory.source_label
+      ]
+        .join(" ")
+        .toLowerCase();
+      const score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+      return {
+        memory,
+        score,
+        snippet: makeSnippet(memory.content, terms.find((term) => haystack.includes(term)) ?? question)
+      };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.memory.id - b.memory.id)
+    .slice(0, options.limit ?? 5);
+
+  return scored.map(({ memory, snippet }) => ({ memory, snippet }));
+}
+
 function insertDraftProposals(
   proposals: DraftProposal[],
   options: HermesRuntimeOptions = {}
@@ -395,36 +444,6 @@ function insertDraftProposals(
   } finally {
     db.close();
   }
-}
-
-function findRelevantApprovedMemories(
-  question: string,
-  options: HermesRuntimeOptions = {}
-): SearchResult[] {
-  const terms = extractSearchTerms(question);
-  const memories = listApprovedMemories(options);
-  const scored = memories
-    .map((memory) => {
-      const haystack = [
-        memory.content,
-        memory.category,
-        memory.tags_json,
-        memory.source_type,
-        memory.source_label
-      ]
-        .join(" ")
-        .toLowerCase();
-      const score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
-      return {
-        memory,
-        score,
-        snippet: makeSnippet(memory.content, terms.find((term) => haystack.includes(term)) ?? question)
-      };
-    })
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score || a.memory.id - b.memory.id);
-
-  return scored.map(({ memory, snippet }) => ({ memory, snippet }));
 }
 
 function extractSearchTerms(question: string): string[] {

@@ -1,6 +1,7 @@
 export type DraftStatus = "pending" | "approved" | "rejected";
 export type MemoryStatus = "approved" | "superseded" | "deleted";
 export type Confidence = "low" | "medium" | "high";
+export type ChatRole = "user" | "hermes";
 
 export interface HermesRuntimeOptions {
   projectRoot?: string;
@@ -55,9 +56,46 @@ export interface MemoryEvent {
   details_json: string;
 }
 
+export interface ChatSession {
+  id: number;
+  created_at: string;
+  updated_at: string;
+  title: string | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  session_id: number;
+  created_at: string;
+  role: ChatRole;
+  content: string;
+  memory_ids_json: string;
+}
+
 export interface SearchResult {
   memory: MemoryEntry;
   snippet: string;
+}
+
+export interface IdeaCandidate {
+  title: string;
+  whyItFits: string;
+  memoryIds: number[];
+  smallestNextArtifact: string;
+}
+
+export interface ChatResponse {
+  mode: "reflection" | "idea";
+  body: string;
+  memoriesUsed: SearchResult[];
+  ideaCandidates: IdeaCandidate[];
+}
+
+export interface ChatTurn {
+  session: ChatSession;
+  userMessage: ChatMessage;
+  hermesMessage: ChatMessage;
+  response: ChatResponse;
 }
 
 export interface ReflectionReport {
