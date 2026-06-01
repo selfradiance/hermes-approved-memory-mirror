@@ -57,6 +57,15 @@ Direct requests such as "remember that..." skip the suggestion card and save the
 
 Direct Add memory intake is intentionally memory-shape aware. Short notes still create one pending draft immediately. Long, multi-paragraph, markdown-like, or source-like notes render a choice screen before any write: split into pending memory suggestions, import as a source, or save as one pending memory anyway. This is guidance, not a safety block; explicit approval is still required before any memory is approved.
 
+Approved memory correction flow (v0.4.7):
+
+```text
+approved memory -> explicit edit -> replacement approved memory + superseded old memory
+approved memory -> explicit retire -> tombstoned memory excluded from normal retrieval
+```
+
+Edits and retirements are local, explicit human actions. Editing creates a new approved row that points to the prior row via `supersedes_id`, then marks the prior row superseded/retired from normal use. Retiring marks the row as a tombstone rather than hard-deleting it. Retired and superseded memories remain inspectable in the System view and `memory_events`, but are excluded from normal chat retrieval, search, reflection, and export by default.
+
 Source library flow (v0.4.0):
 
 ```text
@@ -100,12 +109,12 @@ The server calls the existing service functions directly. It introduces no exter
 
 Runtime data is stored under `.hermes/`. The default database is `.hermes/hermes.db`; the demo uses `.hermes/demo.db`.
 
-Approved memories are append-only. Corrections should later use `supersedes_id` and tombstone-style behavior rather than silent mutation.
+Approved memories are not silently overwritten. Corrections use explicit supersession: a replacement approved row points back with `supersedes_id`, while the prior row is marked superseded with `retired_at`/`retired_reason`. Retirements mark rows as tombstones (internal status `deleted`) with `retired_at`/`retired_reason`; they are not hard-deleted by default.
 
 Chat sessions and messages are stored in `chat_sessions` and `chat_messages` in the same local SQLite database. Assistant messages record the approved memory IDs used for that response.
 
 Dismissed organic suggestions are stored in `memory_suggestion_dismissals`, keyed to the local chat session, user message, and deterministic suggestion hash. This prevents the same suggestion from reappearing after the user dismisses or saves it.
 
-The approved-memory invariant is unchanged: only explicit draft approval writes `memory_entries`. Intake, chat save, direct remember requests, organic suggestion save, and generated reflection create drafts or temporary output only.
+The approved-memory invariant is unchanged: only explicit draft approval writes new memory from suggestions, and only explicit human edit/retire actions change approved memory state. Intake, chat save, direct remember requests, organic suggestion save, and generated reflection create drafts or temporary output only. Models/providers cannot approve, edit, retire, delete, or supersede memory.
 
 Memory candidate detection in local deterministic mode is rule-based. It looks for durable user statements such as preferences, goals, project/workflow statements, settled decisions, and "remember that..." requests. Remember/save request phrases are parsed as instructions: command-only requests produce no memory draft, while requests with a blank-line, colon, dash, or pasted-block payload use the payload as the memory material. Short durable payloads become one pending suggestion; long pasted payloads are split into durable standalone candidates, deduped against approved and pending memories, ranked, and saved as multiple pending suggestions when strong material exists. It avoids greetings, tiny vague messages, temporary statements, commands, and system/debug-like text. It does not inspect assistant responses unless the user explicitly saves the full exchange. In optional Claude API mode the model may additionally return a `MEMORY_SUGGESTION:` line that becomes a save-for-review suggestion, and long remembered payloads may reuse the provider extraction interface over chat-pasted text; provider suggestions that merely repeat a remember/save command phrase are filtered before any draft can be created. All suggestions remain subject to the same human approval boundary.

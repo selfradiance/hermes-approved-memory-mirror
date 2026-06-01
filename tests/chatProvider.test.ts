@@ -350,6 +350,8 @@ describe("Anthropic chat provider (mocked transport)", () => {
       status: "approved" as const,
       supersedes_id: null,
       deleted_at: null,
+      retired_at: null,
+      retired_reason: null,
       approval_note: null
     },
     snippet: "Keep memory approval human-only."

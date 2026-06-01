@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   approveDraft,
   doctor,
+  editApprovedMemory,
   exportApprovedMemories,
   initHermes,
   intakeFile,
@@ -12,8 +13,11 @@ import {
   listApprovedMemories,
   listMemoryEvents,
   listPendingDrafts,
+  listRetiredMemories,
   reflectOnApprovedMemory,
   rejectDraft,
+  retireApprovedMemory,
+  retrieveRelevantApprovedMemories,
   searchApprovedMemories
 } from "../src/hermes.js";
 import type { HermesRuntimeOptions } from "../src/types.js";
@@ -130,6 +134,76 @@ describe("HERmes v0.1", () => {
     const parsed = JSON.parse(fs.readFileSync(exportPath, "utf8"));
     expect(parsed.approved_memories).toHaveLength(1);
     expect(Array.isArray(parsed.memory_events)).toBe(true);
+  });
+
+  it("retiring an approved memory removes it from normal retrieval and keeps it inspectable", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Amber formatting preference should avoid bracketed citations.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+
+    const retired = retireApprovedMemory(memory.id, { ...runtime(root), reason: "outdated" });
+    const events = listMemoryEvents(runtime(root));
+
+    expect(retired.status).toBe("deleted");
+    expect(retired.retired_at).toBeTruthy();
+    expect(retired.retired_reason).toBe("outdated");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(searchApprovedMemories("Amber", runtime(root))).toHaveLength(0);
+    expect(retrieveRelevantApprovedMemories("bracketed citations", runtime(root))).toHaveLength(0);
+    expect(reflectOnApprovedMemory("What about bracketed citations?", runtime(root)).relevantMemoryIds).toEqual([]);
+    expect(listRetiredMemories(runtime(root))).toHaveLength(1);
+    expect(events.map((event) => event.event_type)).toContain("memory_retired");
+  });
+
+  it("editing an approved memory supersedes the old row and uses the replacement normally", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("James prefers old source review notes.", runtime(root));
+    const oldMemory = approveDraft(draft.id, runtime(root));
+
+    const replacement = editApprovedMemory(
+      oldMemory.id,
+      "James prefers inline source review notes with no bracketed reference formatting.",
+      { ...runtime(root), note: "Clarified formatting preference." }
+    );
+    const active = listApprovedMemories(runtime(root));
+    const retired = listRetiredMemories(runtime(root));
+    const events = listMemoryEvents(runtime(root));
+
+    expect(replacement.status).toBe("approved");
+    expect(replacement.supersedes_id).toBe(oldMemory.id);
+    expect(active).toHaveLength(1);
+    expect(active[0]?.id).toBe(replacement.id);
+    expect(active[0]?.content).toContain("no bracketed reference formatting");
+    expect(retired).toHaveLength(1);
+    expect(retired[0]?.id).toBe(oldMemory.id);
+    expect(retired[0]?.status).toBe("superseded");
+    expect(searchApprovedMemories("old source", runtime(root))).toHaveLength(0);
+    expect(searchApprovedMemories("bracketed reference", runtime(root))).toHaveLength(1);
+    expect(retrieveRelevantApprovedMemories("bracketed reference formatting", runtime(root))[0]?.memory.id).toBe(
+      replacement.id
+    );
+    expect(events.map((event) => event.event_type)).toContain("memory_superseded");
+    expect(events.map((event) => event.event_type)).toContain("memory_edited");
+  });
+
+  it("export excludes retired and superseded memories by default", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [retireDraft] = intakeText("Retired export memory.", runtime(root));
+    const [editDraft] = intakeText("Old export memory.", runtime(root));
+    const retiredMemory = approveDraft(retireDraft.id, runtime(root));
+    const editedMemory = approveDraft(editDraft.id, runtime(root));
+    retireApprovedMemory(retiredMemory.id, runtime(root));
+    const replacement = editApprovedMemory(editedMemory.id, "Replacement export memory.", runtime(root));
+
+    const exportPath = exportApprovedMemories(runtime(root));
+    const parsed = JSON.parse(fs.readFileSync(exportPath, "utf8"));
+
+    expect(parsed.approved_memories.map((memory: { id: number }) => memory.id)).toEqual([replacement.id]);
+    expect(parsed.memory_events.map((event: { event_type: string }) => event.event_type)).toContain("memory_retired");
+    expect(parsed.memory_events.map((event: { event_type: string }) => event.event_type)).toContain("memory_superseded");
   });
 
   it("file intake does not crawl directories", () => {

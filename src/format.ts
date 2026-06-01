@@ -31,12 +31,18 @@ export function formatMemories(memories: MemoryEntry[]): string {
     return "No approved memories.";
   }
 
+  const allActive = memories.every(
+    (memory) => memory.status === "approved" && !memory.deleted_at && !memory.retired_at
+  );
   return [
-    `Approved memories: ${memories.length}`,
+    `${allActive ? "Approved memories" : "Memories"}: ${memories.length}`,
     ...memories.map((memory) =>
       [
         `[${memory.id}] ${memory.category}`,
+        ...(allActive ? [] : [`status: ${memory.status}`]),
         `created: ${memory.created_at}`,
+        ...(memory.retired_at ? [`retired: ${memory.retired_at}`] : []),
+        ...(memory.retired_reason ? [`reason: ${memory.retired_reason}`] : []),
         `tags: ${formatTags(memory.tags_json)}`,
         `confidence: ${memory.confidence}`,
         `source: ${memory.source_type} ${memory.source_label}`,

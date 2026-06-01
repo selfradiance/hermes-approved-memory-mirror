@@ -16,14 +16,17 @@ import {
   approveDraft,
   createDraftFromText,
   doctor,
+  editApprovedMemory,
   ensureHermesInitialized,
   exportApprovedMemories,
   initHermes,
   intakeText,
   listApprovedMemories,
   listPendingDrafts,
+  listRetiredMemories,
   reflectOnApprovedMemory,
   rejectDraft,
+  retireApprovedMemory,
   searchApprovedMemories,
   updateDraftProposedContent
 } from "./hermes.js";
@@ -76,6 +79,7 @@ interface RenderState {
   sourceSearchResults?: SourceChunkResult[];
   suggestedDraftIds?: number[];
   longMemoryText?: string;
+  showRetiredMemories?: boolean;
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -236,8 +240,9 @@ export async function handleUiRequest(
 
     if (request.method === "GET" && url.pathname === "/memories") {
       const searchQuery = (url.searchParams.get("query") ?? "").trim();
+      const showRetiredMemories = url.searchParams.get("retired") === "1";
       const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
-      return htmlResponse(renderSystemPage(runtime, { searchQuery, searchResults }));
+      return htmlResponse(renderSystemPage(runtime, { searchQuery, searchResults, showRetiredMemories }));
     }
 
     if (request.method === "POST" && url.pathname === "/init") {
@@ -359,6 +364,40 @@ export async function handleUiRequest(
         return htmlResponse(renderSourcesPage(runtime, { ...sourcesReturn, notice }));
       }
       return htmlResponse(renderPage(runtime, { notice }));
+    }
+
+    if (request.method === "POST" && url.pathname === "/memories/edit") {
+      const form = await readForm(request);
+      const memoryId = parsePositiveInteger(
+        requiredFormValue(form, "memoryId", "Memory id is required."),
+        "Memory id"
+      );
+      const content = requiredFormValue(form, "content", "Memory text is required.");
+      const note = optionalFormValue(form, "note");
+      const replacement = editApprovedMemory(memoryId, content, { ...runtime, note });
+      return htmlResponse(
+        renderSystemPage(runtime, {
+          notice: {
+            kind: "success",
+            message: `Updated memory ${memoryId}. Replacement memory ${replacement.id} is now active.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/memories/retire") {
+      const form = await readForm(request);
+      const memoryId = parsePositiveInteger(
+        requiredFormValue(form, "memoryId", "Memory id is required."),
+        "Memory id"
+      );
+      const reason = optionalFormValue(form, "reason");
+      retireApprovedMemory(memoryId, { ...runtime, reason });
+      return htmlResponse(
+        renderSystemPage(runtime, {
+          notice: { kind: "info", message: `Retired memory ${memoryId}. It will no longer be used by default.` }
+        })
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/reflect") {
@@ -1184,7 +1223,8 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
         <p class="hint">Your memories stay local. Only approved memories are used. No outside actions.</p>
         <p>Approved memories: ${model.approvedMemories.length} · Memory suggestions waiting: ${
           model.pendingDrafts.length
-        }</p>
+        } · Retired memories: ${model.retiredMemories.length}</p>
+        <p><a href="/memories?retired=1">Show retired memories</a></p>
       </section>
 
       <section>
@@ -1514,6 +1554,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
   const canReadMemory = report.dbExists && Object.values(report.tables).every(Boolean);
   const pendingDrafts = canReadMemory ? listPendingDrafts(runtime) : [];
   const approvedMemories = canReadMemory ? listApprovedMemories(runtime) : [];
+  const retiredMemories = canReadMemory ? listRetiredMemories(runtime) : [];
   const chatSessions = canReadMemory ? listChatSessions(runtime) : [];
   const activeSessionId = state.chatTurn?.session.id ?? state.activeSessionId ?? chatSessions.at(-1)?.id;
   const chatMessages =
@@ -1535,6 +1576,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
       : [];
   const searchQuery = state.searchQuery ?? "";
   const modeLabel = state.chatTurn?.providerLabel ?? chatModeLabel();
+  const showRetiredMemories = Boolean(state.showRetiredMemories);
 
   return {
     report,
@@ -1542,6 +1584,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     modeLabel,
     pendingDrafts,
     approvedMemories,
+    retiredMemories,
     chatSessions,
     activeSessionId,
     chatMessages,
@@ -1550,7 +1593,8 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     latestMemorySuggestion,
     latestSourceExcerpts,
     searchQuery,
-    searchResults: state.searchResults
+    searchResults: state.searchResults,
+    showRetiredMemories
   };
 }
 
@@ -1784,6 +1828,10 @@ function renderDraft(draft: MemoryDraft, returnContext?: DraftReturnContext): st
 }
 
 function renderMemoryResults(model: ReturnType<typeof readUiModel>): string {
+  if (model.showRetiredMemories) {
+    return renderRetiredMemories(model.retiredMemories, model.approvedMemories);
+  }
+
   if (model.searchQuery) {
     const results = model.searchResults ?? [];
     if (results.length === 0) {
@@ -1806,6 +1854,75 @@ function renderMemory(memory: MemoryEntry, snippet?: string): string {
     )}</p>
     <p class="meta">Source: ${escapeHtml(memory.source_type)} ${escapeHtml(memory.source_label)}</p>
     <p class="content">${escapeHtml(snippet ?? memory.content)}</p>
+    <details style="margin-top: 10px;">
+      <summary>Edit memory</summary>
+      <p class="hint">Editing creates a new approved memory and retires this version from normal use.</p>
+      <form class="stack" method="post" action="/memories/edit" style="margin-top: 10px;">
+        <input type="hidden" name="memoryId" value="${memory.id}">
+        <label>
+          Memory text
+          <textarea class="draft-edit" name="content" rows="4" required>${escapeHtml(memory.content)}</textarea>
+        </label>
+        <label>
+          Note (optional)
+          <input type="text" name="note" placeholder="What changed?">
+        </label>
+        <div class="actions">
+          <button type="submit">Save edited memory</button>
+        </div>
+      </form>
+    </details>
+    <form class="actions" method="post" action="/memories/retire" style="margin-top: 10px;">
+      <input type="hidden" name="memoryId" value="${memory.id}">
+      <label>
+        Retire reason
+        <select name="reason">
+          <option value="">No reason</option>
+          <option value="outdated">Outdated</option>
+          <option value="wrong">Wrong</option>
+          <option value="duplicate">Duplicate</option>
+          <option value="too broad">Too broad</option>
+          <option value="no longer relevant">No longer relevant</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <button class="danger" type="submit">Retire memory</button>
+    </form>
+  </article>`;
+}
+
+function renderRetiredMemories(retiredMemories: MemoryEntry[], activeMemories: MemoryEntry[]): string {
+  if (retiredMemories.length === 0) {
+    return `<div class="stack">
+      <p class="empty">No retired memories.</p>
+      <p><a href="/system">Show active memories</a></p>
+    </div>`;
+  }
+
+  return `<div class="stack">
+    <p class="hint">Retired and superseded memories are kept for inspection, but are not used by chat, search, reflection, or export by default.</p>
+    <p><a href="/system">Show active memories</a></p>
+    ${retiredMemories.map((memory) => renderRetiredMemory(memory, activeMemories)).join("")}
+  </div>`;
+}
+
+function renderRetiredMemory(memory: MemoryEntry, activeMemories: MemoryEntry[]): string {
+  const replacement = activeMemories.find((candidate) => candidate.supersedes_id === memory.id);
+  return `<article class="item">
+    <p class="item-title"><span>[${memory.id}] ${escapeHtml(memory.category)}</span> <span class="pill">${escapeHtml(
+      memory.status
+    )}</span></p>
+    <p class="meta">Created: ${escapeHtml(memory.created_at)} · Retired: ${escapeHtml(
+      memory.retired_at ?? memory.deleted_at ?? "unknown"
+    )} · Reason: ${escapeHtml(memory.retired_reason ?? "(none)")}</p>
+    ${
+      replacement
+        ? `<p class="meta">Replacement memory: [${replacement.id}]</p>`
+        : memory.supersedes_id
+          ? `<p class="meta">Supersedes memory: [${memory.supersedes_id}]</p>`
+          : ""
+    }
+    <p class="content">${escapeHtml(memory.content)}</p>
   </article>`;
 }
 
@@ -1928,6 +2045,11 @@ function requiredFormValue(form: URLSearchParams, key: string, message: string):
     throw new Error(message);
   }
   return value;
+}
+
+function optionalFormValue(form: URLSearchParams, key: string): string | undefined {
+  const value = (form.get(key) ?? "").trim();
+  return value || undefined;
 }
 
 function parseDraftId(value: string): number {

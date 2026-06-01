@@ -9,6 +9,7 @@ import {
   intakeText,
   listApprovedMemories,
   listPendingDrafts,
+  listRetiredMemories,
   reflectOnApprovedMemory
 } from "../src/hermes.js";
 import { DEFAULT_UI_HOST, handleUiRequest, startUiServer } from "../src/ui.js";
@@ -335,6 +336,72 @@ describe("HERmes Local Web Chat UI", () => {
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
     expect(listApprovedMemories(runtime(root))).toHaveLength(1);
     expect(listApprovedMemories(runtime(root))[0]?.content).toContain("Approve this UI draft");
+  });
+
+  it("system page shows edit and retire controls for approved memories", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Approved memory that can be corrected.", runtime(root));
+    approveDraft(draft.id, runtime(root));
+
+    const response = await handleUiRequest(getRequest("/system"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Edit memory");
+    expect(html).toContain("Retire memory");
+    expect(html).toContain('action="/memories/edit"');
+    expect(html).toContain('action="/memories/retire"');
+  });
+
+  it("editing an approved memory through the UI creates an active replacement", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Old UI approved memory.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/memories/edit", {
+        memoryId: String(memory.id),
+        content: "Updated UI approved memory with better retrieval wording.",
+        note: "Better wording"
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const active = listApprovedMemories(runtime(root));
+    const retired = listRetiredMemories(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Replacement memory");
+    expect(active).toHaveLength(1);
+    expect(active[0]?.content).toContain("better retrieval wording");
+    expect(active[0]?.supersedes_id).toBe(memory.id);
+    expect(retired).toHaveLength(1);
+    expect(retired[0]?.status).toBe("superseded");
+  });
+
+  it("retiring an approved memory through the UI hides it from normal memory search", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Cobalt retired UI memory.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/memories/retire", { memoryId: String(memory.id), reason: "outdated" }),
+      runtime(root)
+    );
+    const retiredPage = await handleUiRequest(getRequest("/memories?retired=1"), runtime(root));
+    const searchPage = await handleUiRequest(getRequest("/memories?query=Cobalt"), runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("Retired memory");
+    expect(await searchPage.text()).toContain('No approved memories matched "Cobalt".');
+    const retiredHtml = await retiredPage.text();
+    expect(retiredHtml).toContain("Retired and superseded memories are kept for inspection");
+    expect(retiredHtml).toContain("Cobalt retired UI memory.");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listRetiredMemories(runtime(root))).toHaveLength(1);
   });
 
   it("rejecting through the UI does not create approved memory", async () => {

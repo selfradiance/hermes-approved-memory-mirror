@@ -18,6 +18,7 @@ import type {
 } from "./types.js";
 
 const BASIS_NOTE = "Reflection is based only on approved local memory." as const;
+const ACTIVE_MEMORY_WHERE = "status = 'approved' AND deleted_at IS NULL AND retired_at IS NULL";
 const REFLECTION_STOPWORDS = new Set([
   "about",
   "after",
@@ -158,8 +159,10 @@ export function approveDraft(
             status,
             supersedes_id,
             deleted_at,
+            retired_at,
+            retired_reason,
             approval_note
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'approved', NULL, NULL, ?)`
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'approved', NULL, NULL, NULL, NULL, ?)`
         )
         .run(
           now,
@@ -232,10 +235,135 @@ export function listApprovedMemories(options: HermesRuntimeOptions = {}): Memory
   const db = openExistingDb(options);
   try {
     return db
+      .prepare(`SELECT * FROM memory_entries WHERE ${ACTIVE_MEMORY_WHERE} ORDER BY id ASC`)
+      .all() as MemoryEntry[];
+  } finally {
+    db.close();
+  }
+}
+
+export function listRetiredMemories(options: HermesRuntimeOptions = {}): MemoryEntry[] {
+  const db = openExistingDb(options);
+  try {
+    return db
       .prepare(
-        "SELECT * FROM memory_entries WHERE status = 'approved' AND deleted_at IS NULL ORDER BY id ASC"
+        `SELECT * FROM memory_entries
+         WHERE status != 'approved' OR deleted_at IS NOT NULL OR retired_at IS NOT NULL
+         ORDER BY id ASC`
       )
       .all() as MemoryEntry[];
+  } finally {
+    db.close();
+  }
+}
+
+export function editApprovedMemory(
+  memoryId: number,
+  content: string,
+  options: HermesRuntimeOptions & { note?: string } = {}
+): MemoryEntry {
+  const normalized = content.trim();
+  if (!normalized) {
+    throw new Error("Memory text cannot be empty.");
+  }
+
+  const db = openExistingDb(options);
+  try {
+    const edit = db.transaction(() => {
+      const previous = getActiveMemoryOrThrow(db, memoryId);
+      const now = nowIso();
+      const info = db
+        .prepare(
+          `INSERT INTO memory_entries (
+            created_at,
+            updated_at,
+            source_type,
+            source_label,
+            category,
+            content,
+            tags_json,
+            confidence,
+            status,
+            supersedes_id,
+            deleted_at,
+            retired_at,
+            retired_reason,
+            approval_note
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'approved', ?, NULL, NULL, NULL, ?)`
+        )
+        .run(
+          now,
+          previous.source_type,
+          previous.source_label,
+          previous.category,
+          normalized,
+          previous.tags_json,
+          previous.confidence,
+          previous.id,
+          options.note ?? previous.approval_note
+        );
+      const replacementId = Number(info.lastInsertRowid);
+      const supersedeReason = options.note ?? `Edited into memory ${replacementId}.`;
+
+      db.prepare(
+        `UPDATE memory_entries
+         SET status = 'superseded',
+             updated_at = ?,
+             deleted_at = ?,
+             retired_at = ?,
+             retired_reason = ?
+         WHERE id = ? AND ${ACTIVE_MEMORY_WHERE}`
+      ).run(now, now, now, supersedeReason, previous.id);
+
+      insertEvent(db, {
+        memory_id: previous.id,
+        event_type: "memory_superseded",
+        created_at: now,
+        details: { replacementMemoryId: replacementId, reason: supersedeReason }
+      });
+      insertEvent(db, {
+        memory_id: replacementId,
+        event_type: "memory_edited",
+        created_at: now,
+        details: { supersedesMemoryId: previous.id, note: options.note ?? null }
+      });
+
+      return getMemoryByIdOrThrow(db, replacementId);
+    });
+    return edit();
+  } finally {
+    db.close();
+  }
+}
+
+export function retireApprovedMemory(
+  memoryId: number,
+  options: HermesRuntimeOptions & { reason?: string } = {}
+): MemoryEntry {
+  const db = openExistingDb(options);
+  try {
+    const retire = db.transaction(() => {
+      getActiveMemoryOrThrow(db, memoryId);
+      const now = nowIso();
+      const reason = options.reason?.trim() || null;
+      db.prepare(
+        `UPDATE memory_entries
+         SET status = 'deleted',
+             updated_at = ?,
+             deleted_at = ?,
+             retired_at = ?,
+             retired_reason = ?
+         WHERE id = ? AND ${ACTIVE_MEMORY_WHERE}`
+      ).run(now, now, now, reason, memoryId);
+      insertEvent(db, {
+        memory_id: memoryId,
+        event_type: "memory_retired",
+        created_at: now,
+        details: { reason }
+      });
+      return getMemoryByIdOrThrow(db, memoryId);
+    });
+    return retire();
   } finally {
     db.close();
   }
@@ -258,6 +386,7 @@ export function searchApprovedMemories(
         `SELECT * FROM memory_entries
          WHERE status = 'approved'
            AND deleted_at IS NULL
+           AND retired_at IS NULL
            AND (
              content LIKE ? ESCAPE '\\'
              OR category LIKE ? ESCAPE '\\'
@@ -317,9 +446,7 @@ export function exportApprovedMemories(options: HermesRuntimeOptions = {}): stri
   try {
     fs.mkdirSync(paths.exportDir, { recursive: true });
     const approvedMemories = db
-      .prepare(
-        "SELECT * FROM memory_entries WHERE status = 'approved' AND deleted_at IS NULL ORDER BY id ASC"
-      )
+      .prepare(`SELECT * FROM memory_entries WHERE ${ACTIVE_MEMORY_WHERE} ORDER BY id ASC`)
       .all() as MemoryEntry[];
     const events = db.prepare("SELECT * FROM memory_events ORDER BY event_id ASC").all() as MemoryEvent[];
 
@@ -368,6 +495,7 @@ export function doctor(options: HermesRuntimeOptions = {}): DoctorReport {
 
   const db = openDatabase(options, "existing");
   try {
+    initializeSchema(db);
     const tables = Object.fromEntries(TABLES.map((table) => [table, tableExists(db, table)]));
     const pendingDraftCount = tables.memory_drafts
       ? countSingle(db, "SELECT COUNT(*) AS count FROM memory_drafts WHERE status = 'pending'")
@@ -375,7 +503,7 @@ export function doctor(options: HermesRuntimeOptions = {}): DoctorReport {
     const approvedMemoryCount = tables.memory_entries
       ? countSingle(
           db,
-          "SELECT COUNT(*) AS count FROM memory_entries WHERE status = 'approved' AND deleted_at IS NULL"
+          `SELECT COUNT(*) AS count FROM memory_entries WHERE ${ACTIVE_MEMORY_WHERE}`
         )
       : 0;
 
@@ -521,6 +649,16 @@ function getDraftByIdOrThrow(db: Database.Database, draftId: number): MemoryDraf
   return draft;
 }
 
+function getActiveMemoryOrThrow(db: Database.Database, memoryId: number): MemoryEntry {
+  const memory = db.prepare(`SELECT * FROM memory_entries WHERE id = ? AND ${ACTIVE_MEMORY_WHERE}`).get(memoryId) as
+    | MemoryEntry
+    | undefined;
+  if (!memory) {
+    throw new Error(`Approved memory ${memoryId} was not found.`);
+  }
+  return memory;
+}
+
 function getMemoryByIdOrThrow(db: Database.Database, memoryId: number): MemoryEntry {
   const memory = db.prepare("SELECT * FROM memory_entries WHERE id = ?").get(memoryId) as
     | MemoryEntry
@@ -560,6 +698,7 @@ function insertEvent(
 
 function openExistingDb(options: HermesRuntimeOptions): Database.Database {
   const db = openDatabase(options, "existing");
+  initializeSchema(db);
   const missingTable = TABLES.find((table) => !tableExists(db, table));
   if (missingTable) {
     db.close();

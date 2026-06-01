@@ -109,6 +109,8 @@ export interface MemoryEntry {
   status: MemoryStatus;
   supersedes_id: number | null;
   deleted_at: string | null;
+  retired_at: string | null;
+  retired_reason: string | null;
   approval_note: string | null;
 }
 

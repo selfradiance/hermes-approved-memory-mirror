@@ -12,14 +12,17 @@ import {
 import {
   approveDraft,
   doctor,
+  editApprovedMemory,
   exportApprovedMemories,
   initHermes,
   intakeFile,
   intakeText,
   listApprovedMemories,
   listPendingDrafts,
+  listRetiredMemories,
   reflectOnApprovedMemory,
   rejectDraft,
+  retireApprovedMemory,
   searchApprovedMemories
 } from "./hermes.js";
 import {
@@ -48,7 +51,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.4.5");
+    .version("0.4.7");
 
   program
     .command("init")
@@ -106,8 +109,33 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .command("list")
     .description("List approved memory entries")
-    .action(() => {
-      out(formatMemories(listApprovedMemories(runtime)));
+    .option("--retired", "list retired and superseded memories")
+    .action((options: { retired?: boolean }) => {
+      out(formatMemories(options.retired ? listRetiredMemories(runtime) : listApprovedMemories(runtime)));
+    });
+
+  program
+    .command("edit")
+    .description("Create an approved correction that supersedes an existing approved memory")
+    .argument("<memory-id>", "approved memory id")
+    .requiredOption("--text <text>", "replacement memory text")
+    .option("--note <note>", "optional correction note")
+    .action((memoryId: string, options: { text: string; note?: string }) => {
+      const replacement = editApprovedMemory(parseDraftId(memoryId), options.text, {
+        ...runtime,
+        note: options.note
+      });
+      out(`Edited memory ${memoryId}; replacement memory ${replacement.id} is now active.`);
+    });
+
+  program
+    .command("retire")
+    .description("Retire an approved memory from normal retrieval")
+    .argument("<memory-id>", "approved memory id")
+    .option("--reason <reason>", "optional retirement reason")
+    .action((memoryId: string, options: { reason?: string }) => {
+      retireApprovedMemory(parseDraftId(memoryId), { ...runtime, reason: options.reason });
+      out(`Retired memory ${memoryId}.`);
     });
 
   program

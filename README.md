@@ -135,6 +135,8 @@ After you save, Approved Mind Mirror says "Saved for review. Approve it when you
 
 The direct **Add memory** form is meant for short durable notes and preferences. If you paste a long, multi-paragraph, or source-like note there, Approved Mind Mirror now asks how you want to handle it: split it into memory suggestions, import it as a source, or save it as one memory anyway. Any memory-shaped result still waits for explicit approval.
 
+Approved memories can also be corrected or retired through explicit human action in the local UI. Editing an approved memory creates a new approved replacement and retires the prior version from normal retrieval; retiring a memory keeps a local tombstone instead of hard-deleting it. Retired and superseded memories are inspectable, but they are excluded from normal chat retrieval, search, reflection, and JSON export by default.
+
 Flow:
 
 ```text
@@ -257,9 +259,9 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 `memory_drafts` stores proposed memories created by intake. Drafts have `pending`, `approved`, or `rejected` status.
 
-`memory_entries` stores approved memory only. Each approved memory has a source, timestamp, category, tags, confidence, status, and audit event. Entries are not hard-deleted.
+`memory_entries` stores approved memory and retired/superseded memory history. Each approved memory has a source, timestamp, category, tags, confidence, status, and audit event. Entries are not hard-deleted. Edits create a replacement row with `supersedes_id`; the old row is retired from normal use. Retired/superseded entries are excluded from chat, search, reflection, and export by default.
 
-`memory_events` stores audit events for draft creation, approval, rejection, memory creation, and export.
+`memory_events` stores audit events for draft creation, approval, rejection, memory creation, memory edit/supersession, retirement, and export.
 
 `chat_sessions` and `chat_messages` store local web and terminal chat history. Assistant messages record the approved memory IDs used for each response.
 
@@ -273,7 +275,8 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 2. `review` shows pending drafts.
 3. `approve <draft-id>` writes an approved memory entry and audit events.
 4. `reject <draft-id>` marks a draft rejected and writes an audit event.
-5. Web chat, terminal chat, `search`, `list`, `reflect`, and `export` use approved memory only.
+5. Explicit edit/retire controls can supersede or retire an approved memory without hard-deleting history.
+6. Web chat, terminal chat, `search`, `list`, `reflect`, and `export` use active approved memory only.
 
 ## Chat Provider Interface
 

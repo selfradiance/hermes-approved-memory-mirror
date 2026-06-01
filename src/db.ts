@@ -68,6 +68,8 @@ export function initializeSchema(db: Database.Database): void {
       status TEXT NOT NULL CHECK (status IN ('approved', 'superseded', 'deleted')),
       supersedes_id INTEGER REFERENCES memory_entries(id),
       deleted_at TEXT,
+      retired_at TEXT,
+      retired_reason TEXT,
       approval_note TEXT
     );
 
@@ -149,6 +151,9 @@ export function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status);
     CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, chunk_index);
   `);
+
+  ensureColumn(db, "memory_entries", "retired_at", "TEXT");
+  ensureColumn(db, "memory_entries", "retired_reason", "TEXT");
 }
 
 export function tableExists(db: Database.Database, tableName: string): boolean {
@@ -156,4 +161,17 @@ export function tableExists(db: Database.Database, tableName: string): boolean {
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
     .get(tableName);
   return Boolean(row);
+}
+
+function ensureColumn(
+  db: Database.Database,
+  tableName: string,
+  columnName: string,
+  definition: string
+): void {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === columnName)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }

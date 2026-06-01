@@ -21,6 +21,7 @@ import {
   intakeText,
   listApprovedMemories,
   listPendingDrafts,
+  retireApprovedMemory,
   retrieveRelevantApprovedMemories
 } from "../src/hermes.js";
 import type { HermesRuntimeOptions, SearchResult } from "../src/types.js";
@@ -66,6 +67,18 @@ describe("HERmes v0.2 chat", () => {
 
     expect(results.map(({ memory }) => memory.id)).toEqual([seedanceId]);
     expect(results[0]?.snippet).toContain("Seedance storyboard");
+  });
+
+  it("does not retrieve retired memories for chat", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const memoryId = approveText(root, "Cobalt chat memory should not appear after retirement.");
+    retireApprovedMemory(memoryId, runtime(root));
+
+    const turn = await sendChatMessage("What about Cobalt chat memory?", runtime(root));
+
+    expect(turn.response.memoriesUsed).toHaveLength(0);
+    expect(turn.hermesMessage.content).toContain("Memories used:\n- none");
   });
 
   it("idea mode returns multiple ideas with memory references", async () => {
@@ -356,6 +369,8 @@ describe("HERmes v0.2 chat", () => {
         status: "approved",
         supersedes_id: null,
         deleted_at: null,
+        retired_at: null,
+        retired_reason: null,
         approval_note: null
       },
       snippet: "Use tiny storyboard artifacts."
