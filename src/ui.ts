@@ -110,7 +110,7 @@ export async function handleUiRequest(
           notice: chatTurn.savedDraft
             ? {
                 kind: "success",
-                message: "Saved as a draft. Review and approve it before it becomes memory."
+                message: "Saved for review. Approve it when you’re ready."
               }
             : undefined
         })
@@ -120,13 +120,13 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/chat/save-draft") {
       const form = await readForm(request);
       const sessionId = parseDraftId(requiredFormValue(form, "sessionId", "Chat session id is required."));
-      const draft = saveLatestChatExchangeDraft(sessionId, runtime);
+      saveLatestChatExchangeDraft(sessionId, runtime);
       return htmlResponse(
         renderPage(runtime, {
           activeSessionId: sessionId,
           notice: {
             kind: "success",
-            message: `Created pending draft ${draft.id}. Review and approve it separately if it should become memory.`
+            message: "Saved for review. Approve it when you’re ready."
           }
         })
       );
@@ -154,7 +154,7 @@ export async function handleUiRequest(
       );
       const suggestionKey = requiredFormValue(form, "suggestionKey", "Suggestion key is required.");
       const proposedContent = requiredFormValue(form, "proposedContent", "Suggested memory text is required.");
-      const draft = saveSuggestedMemoryDraft(
+      saveSuggestedMemoryDraft(
         { proposedContent, sourceSessionId: sessionId, sourceMessageId: messageId, suggestionKey },
         runtime
       );
@@ -163,7 +163,7 @@ export async function handleUiRequest(
           activeSessionId: sessionId,
           notice: {
             kind: "success",
-            message: `Created pending draft ${draft.id}. Review and approve it before it becomes memory.`
+            message: "Saved for review. Approve it when you’re ready."
           }
         })
       );
@@ -207,14 +207,12 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/drafts") {
       const form = await readForm(request);
       const text = requiredFormValue(form, "text", "Note text is required.");
-      const drafts = intakeText(text, runtime);
+      intakeText(text, runtime);
       return htmlResponse(
         renderPage(runtime, {
           notice: {
             kind: "success",
-            message: `Created pending draft${drafts.length === 1 ? "" : "s"}: ${drafts
-              .map((draft) => draft.id)
-              .join(", ")}.`
+            message: "Saved for review. Approve it when you’re ready."
           }
         })
       );
@@ -222,22 +220,22 @@ export async function handleUiRequest(
 
     if (request.method === "POST" && url.pathname === "/drafts/approve") {
       const form = await readForm(request);
-      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Draft id is required."));
-      const memory = approveDraft(draftId, runtime);
+      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Memory id is required."));
+      approveDraft(draftId, runtime);
       return htmlResponse(
         renderPage(runtime, {
-          notice: { kind: "success", message: `Approved draft ${draftId} as memory ${memory.id}.` }
+          notice: { kind: "success", message: "Approved memory. It’s now part of your approved memories." }
         })
       );
     }
 
     if (request.method === "POST" && url.pathname === "/drafts/reject") {
       const form = await readForm(request);
-      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Draft id is required."));
+      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Memory id is required."));
       rejectDraft(draftId, runtime);
       return htmlResponse(
         renderPage(runtime, {
-          notice: { kind: "success", message: `Rejected draft ${draftId}.` }
+          notice: { kind: "info", message: "Dismissed." }
         })
       );
     }
@@ -674,7 +672,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
         <p class="tagline">Your memories stay local. Only approved memories are used. No outside actions.</p>
       </div>
       <nav class="top-actions" aria-label="App actions">
-        <a href="#review-drafts">Review drafts${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
+        <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
         <a href="#add-memory">Add memory</a>
         <a href="/system">System</a>
       </nav>
@@ -694,10 +692,11 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
           <button class="secondary" type="submit"${model.canReadMemory ? "" : " disabled"}>New Chat</button>
         </form>
       </div>
+      <p class="hint">HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it.</p>
       ${
         model.approvedMemories.length === 0
           ? `<div class="onboarding">
-              <p>Just talk naturally. I'll suggest memories when something seems worth saving.</p>
+              <p>Just start chatting. HERmes will suggest memories when something seems worth saving.</p>
               <a class="link-button" href="#add-memory">Add memory</a>
             </div>`
           : ""
@@ -715,14 +714,14 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
               <textarea name="text" required placeholder="Paste something HERmes should remember after you approve it."></textarea>
             </label>
             <div class="actions">
-              <button type="submit">Create draft</button>
+              <button type="submit">Save for review</button>
             </div>
           </form>
         </div>
       </details>
 
       <details class="panel" id="review-drafts"${model.pendingDrafts.length > 0 ? " open" : ""}>
-        <summary>Review drafts${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</summary>
+        <summary>Review memory suggestions${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</summary>
         <div class="panel-body">
           ${renderDrafts(model.pendingDrafts)}
         </div>
@@ -944,13 +943,13 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
       <section>
         <h2>Memory</h2>
         <p class="hint">Your memories stay local. Only approved memories are used. No outside actions.</p>
-        <p>Approved memories: ${model.approvedMemories.length} · Drafts waiting for review: ${
+        <p>Approved memories: ${model.approvedMemories.length} · Memory suggestions waiting: ${
           model.pendingDrafts.length
         }</p>
       </section>
 
       <section>
-        <h2>Review Drafts</h2>
+        <h2>Review memory suggestions</h2>
         <div class="stack" style="margin-top: 12px;">
           ${renderDrafts(model.pendingDrafts)}
         </div>
@@ -1072,7 +1071,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         </div>
         <p class="hint">${
           model.canReadMemory
-            ? "Saving an exchange creates a draft only."
+            ? "Saving an exchange only saves it for review."
             : "HERmes could not open your local memory store."
         }</p>
       </div>
@@ -1083,7 +1082,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         ${sessionInput}
         <button class="secondary" type="submit"${
           model.activeSessionId && model.latestHermesMessage ? "" : " disabled"
-        }>Save as draft</button>
+        }>Save for review</button>
       </form>
       ${renderLatestMemorySources(model.latestHermesMessage, model.latestMemorySources)}
     </div>
@@ -1128,10 +1127,10 @@ function renderMemorySuggestion(suggestion: MemorySuggestion): string {
 
   return `<section class="memory-suggestion" aria-label="Memory suggestion">
     <div>
-      <h3>This may be worth remembering.</h3>
+      <h3>This seems worth remembering.</h3>
       <p class="suggestion-meta">Suggested as ${escapeHtml(
         suggestion.suggestedCategory
-      )} · Tags: ${escapeHtml(tags)} · Source: current chat message</p>
+      )} · Tags: ${escapeHtml(tags)} · From this chat</p>
     </div>
     <form class="stack" method="post" action="/memory-suggestions/save">
       ${hiddenFields}
@@ -1140,7 +1139,7 @@ function renderMemorySuggestion(suggestion: MemorySuggestion): string {
         <textarea name="proposedContent" required>${escapeHtml(suggestion.proposedContent)}</textarea>
       </label>
       <div class="suggestion-actions">
-        <button type="submit"${sourceReady ? "" : " disabled"}>Save as draft</button>
+        <button type="submit"${sourceReady ? "" : " disabled"}>Save for review</button>
         <button class="secondary" type="button" onclick="this.closest('form').querySelector('textarea').focus()">Edit</button>
       </div>
     </form>
@@ -1172,7 +1171,7 @@ function renderNotice(notice: Notice): string {
 
 function renderDrafts(drafts: MemoryDraft[]): string {
   if (drafts.length === 0) {
-    return `<p class="empty">No pending drafts.</p>`;
+    return `<p class="empty">No memory suggestions waiting.</p>`;
   }
 
   return `<div class="stack">${drafts.map(renderDraft).join("")}</div>`;
@@ -1180,7 +1179,7 @@ function renderDrafts(drafts: MemoryDraft[]): string {
 
 function renderDraft(draft: MemoryDraft): string {
   return `<article class="item">
-    <p class="item-title"><span>Draft ${draft.id}</span></p>
+    <p class="item-title"><span>Memory suggestion</span></p>
     <p class="meta">Suggested as ${escapeHtml(draft.proposed_category)} · Tags: ${escapeHtml(
       formatTags(draft.proposed_tags_json)
     )}</p>
@@ -1188,11 +1187,11 @@ function renderDraft(draft: MemoryDraft): string {
     <div class="actions" style="margin-top: 12px;">
       <form method="post" action="/drafts/approve">
         <input type="hidden" name="draftId" value="${draft.id}">
-        <button type="submit">Approve</button>
+        <button type="submit">Approve memory</button>
       </form>
       <form method="post" action="/drafts/reject">
         <input type="hidden" name="draftId" value="${draft.id}">
-        <button class="danger" type="submit">Reject</button>
+        <button class="danger" type="submit">Dismiss</button>
       </form>
     </div>
   </article>`;

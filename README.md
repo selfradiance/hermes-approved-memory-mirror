@@ -1,8 +1,8 @@
 # HERmes — Approved Memory Mirror
 
-HERmes is a tiny local TypeScript/Node memory mirror for James. Its primary interface is a localhost-only web chat UI for conversational reflection, idea mirroring, memory draft review, approved-memory search, and JSON export. The CLI remains available for advanced use.
+HERmes is a private local memory mirror and idea partner. You chat with it in a simple local browser window. As you talk, HERmes may notice something worth remembering and suggest it. Nothing becomes an approved memory until you approve it.
 
-HERmes stores only human-approved memories. Intake and chat can propose drafts. Drafts are not memory until you approve them.
+HERmes stores only memories you approve. Chat can suggest memories and save them for review, but a memory suggestion saved for review is not an approved memory until you approve it. The CLI remains available for advanced use.
 
 ## What It Is Not
 
@@ -70,17 +70,17 @@ The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rej
 In the UI:
 
 1. Chat with HERmes in the browser.
-2. See HERmes responses and the approved memories used.
-3. Let HERmes suggest possible memories when something in chat sounds durable.
-4. Edit, save, or dismiss memory suggestions.
-5. Save the latest exchange as a pending draft.
-6. Review pending drafts and approve or reject them.
-7. Add notes as pending drafts.
+2. See HERmes responses and the sources from your memory used.
+3. Let HERmes suggest a memory when something in chat seems worth remembering.
+4. Edit, save for review, or dismiss a memory suggestion.
+5. Save the latest exchange for review.
+6. Review memory suggestions, then approve a memory or dismiss it.
+7. Add a note and save it for review.
 8. Open `System` only when you want diagnostics, search, deterministic reflection, or local JSON export.
 
-Only approved memories are used for chat/list/search/reflect. Saving a chat exchange or suggestion creates a pending draft only; it does not approve memory.
+Only approved memories are used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve a memory.
 
-HERmes initializes its local memory store automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics. If you have no approved memories yet, just talk naturally; HERmes will suggest memories when something seems worth saving.
+HERmes sets itself up automatically on first use. Normal chat does not require looking at database paths, table names, or setup diagnostics. If you have no approved memories yet, just start chatting; HERmes will suggest memories when something seems worth saving.
 
 What the UI cannot do:
 
@@ -99,19 +99,19 @@ HERmes v0.2.3 notices simple durable statements in chat with deterministic rules
 When a candidate appears, the UI shows a small card:
 
 ```text
-This may be worth remembering.
+This seems worth remembering.
 Proposed memory: I prefer project notes that end with one tiny artifact.
 Suggested as: preference
-Source: current chat message
-[Save as draft] [Edit] [Dismiss]
+From this chat
+[Save for review] [Edit] [Dismiss]
 ```
 
-If you say "remember that...", "save this...", or "add this to memory...", HERmes creates a pending draft immediately and tells you to review it. It still does not create approved memory. Approval remains explicit through the review flow.
+After you save, HERmes says "Saved for review. Approve it when you’re ready." If you say "remember that...", "save this...", or "add this to memory...", HERmes saves it for review immediately and tells you to approve it when ready. It still does not create an approved memory. Approval remains explicit through the review flow.
 
 Flow:
 
 ```text
-chat message -> memory suggestion -> pending draft -> approval -> approved memory
+chat message -> memory suggestion -> save for review -> approve memory -> approved memory
 ```
 
 The detector is local and rule-based. It does not call an LLM/API, does not browse, and does not take external actions.

@@ -58,11 +58,28 @@ describe("HERmes Local Web Chat UI", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("HERmes");
-    expect(html).toContain("Just talk naturally. I'll suggest memories when something seems worth saving.");
+    expect(html).toContain("Just start chatting. HERmes will suggest memories when something seems worth saving.");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
   });
 
-  it("keeps database diagnostics off the default chat page", async () => {
+  it("uses human-facing memory language on the default chat page", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Review memory suggestions");
+    expect(html).toContain("Save for review");
+    expect(html).toContain(
+      "HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it."
+    );
+    expect(html).not.toContain(">Create draft<");
+    expect(html).not.toContain(">Save as draft<");
+    expect(html).not.toContain("Review drafts");
+  });
+
+  it("keeps database and internal language off the default chat page", async () => {
     const root = makeProject();
 
     const response = await handleUiRequest(getRequest("/"), runtime(root));
@@ -72,6 +89,9 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("Database path:");
     expect(html).not.toContain("Tables:");
     expect(html).not.toContain("memory_entries");
+    expect(html).not.toContain("memory_drafts");
+    expect(html).not.toContain("chat_sessions");
+    expect(html).not.toContain("chat_messages");
     expect(html).not.toContain("External connectors/tools configured");
     expect(html).not.toContain("HERmes posture");
     expect(html).not.toContain("Initialize Local Database");
@@ -165,7 +185,7 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Created pending draft");
+    expect(html).toContain("Saved for review.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(1);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
@@ -179,8 +199,10 @@ describe("HERmes Local Web Chat UI", () => {
       formRequest("/drafts/approve", { draftId: String(draft.id) }),
       runtime(root)
     );
+    const html = await response.text();
 
     expect(response.status).toBe(200);
+    expect(html).toContain("Approved memory.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
     expect(listApprovedMemories(runtime(root))).toHaveLength(1);
     expect(listApprovedMemories(runtime(root))[0]?.content).toContain("Approve this UI draft");
@@ -195,8 +217,10 @@ describe("HERmes Local Web Chat UI", () => {
       formRequest("/drafts/reject", { draftId: String(draft.id) }),
       runtime(root)
     );
+    const html = await response.text();
 
     expect(response.status).toBe(200);
+    expect(html).toContain("Dismissed.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
@@ -260,9 +284,9 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("This may be worth remembering.");
+    expect(html).toContain("This seems worth remembering.");
     expect(html).toContain("Proposed memory");
-    expect(html).toContain("Save as draft");
+    expect(html).toContain("Save for review");
     expect(html).toContain("Dismiss");
     expect(html).toContain("I prefer project notes");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
@@ -283,7 +307,7 @@ describe("HERmes Local Web Chat UI", () => {
     const pendingDrafts = listPendingDrafts(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Saved as a draft. Review and approve it before it becomes memory.");
+    expect(html).toContain("Saved for review.");
     expect(pendingDrafts).toHaveLength(1);
     expect(pendingDrafts[0]?.status).toBe("pending");
     expect(pendingDrafts[0]?.source_type).toBe("chat");
@@ -320,8 +344,8 @@ describe("HERmes Local Web Chat UI", () => {
     const pendingDrafts = listPendingDrafts(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(savedHtml).toContain("Created pending draft");
-    expect(savedHtml).not.toContain("This may be worth remembering.");
+    expect(savedHtml).toContain("Saved for review.");
+    expect(savedHtml).not.toContain("This seems worth remembering.");
     expect(pendingDrafts).toHaveLength(1);
     expect(pendingDrafts[0]?.status).toBe("pending");
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
@@ -355,7 +379,7 @@ describe("HERmes Local Web Chat UI", () => {
 
     expect(response.status).toBe(200);
     expect(dismissedHtml).toContain("Memory suggestion dismissed.");
-    expect(dismissedHtml).not.toContain("This may be worth remembering.");
+    expect(dismissedHtml).not.toContain("This seems worth remembering.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
   });
 
@@ -375,7 +399,7 @@ describe("HERmes Local Web Chat UI", () => {
     const pendingDrafts = listPendingDrafts(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Created pending draft");
+    expect(html).toContain("Saved for review.");
     expect(pendingDrafts).toHaveLength(1);
     expect(pendingDrafts[0]?.status).toBe("pending");
     expect(pendingDrafts[0]?.source_type).toBe("chat");
