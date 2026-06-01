@@ -2,7 +2,12 @@ import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { openDatabase, tableExists, TABLES } from "./db.js";
 import { createDraftProposalFromText } from "./draftGeneration.js";
-import { createDraftFromText, retrieveRelevantApprovedMemories } from "./hermes.js";
+import {
+  createDraftFromText,
+  listApprovedMemories,
+  listPendingDrafts,
+  retrieveRelevantApprovedMemories
+} from "./hermes.js";
 import { retrieveRelevantSourceChunks } from "./sources.js";
 import { AnthropicChatProvider } from "./llm/anthropicChatProvider.js";
 import { DETERMINISTIC_LABEL, resolveChatModeConfig } from "./llm/chatMode.js";
@@ -21,7 +26,8 @@ import type {
   IdeaCandidate,
   MemorySuggestion,
   MemoryDraft,
-  SearchResult
+  SearchResult,
+  SourceMemoryCandidate
 } from "./types.js";
 
 const IDEA_PROMPT_RE =
@@ -39,6 +45,7 @@ const MEMORY_REQUEST_LINE_RE =
 const INLINE_MEMORY_PAYLOAD_RES = [
   /^(?:please\s+)?(?:remember(?:\s+that)?|save\s+(?:this|that|it|all\s+this|everything)|add\s+(?:this|that|it|all\s+this|everything)\s+to\s+memory|add\s+to\s+memory)\s*[:,-]\s*(.+)$/is,
   /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:remember|save)\s+(?:this|that|it|all\s+this|it\s+all|everything)\??\s*[:,-]\s*(.+)$/is,
+  /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:remember|save)\s+(?:this|that|it|all\s+this|it\s+all|everything)\?\s+(.+)$/is,
   /^(?:please\s+)?remember\s+that\s+(.+)$/is
 ] as const;
 
@@ -96,6 +103,20 @@ const TEMPORARY_RE =
   /\b(?:today|tonight|tomorrow|this morning|this afternoon|this evening|right now|for now|temporary|just testing|test message)\b/i;
 const SYSTEMISH_RE =
   /\b(?:stack trace|debug log|sqlite error|database path|table names?|npm run|node_modules|localhost|127\.0\.0\.1)\b/i;
+
+const LONG_REMEMBER_PAYLOAD_CHARS = 500;
+const REMEMBERED_PAYLOAD_LIMIT = 7;
+const MIN_REMEMBERED_CANDIDATE_CHARS = 20;
+const MIN_REMEMBERED_CANDIDATE_WORDS = 4;
+const REMEMBERED_NEAR_DUPLICATE_JACCARD = 0.8;
+
+const REMEMBERED_DURABLE_PATTERNS = [
+  ...MEMORY_SIGNAL_PATTERNS,
+  /\b(?:should|must|need to|needs to|have to|avoid|never|always|by default)\b/i,
+  /\b(?:workflow|process|rule|principle|preference|goal|direction|decision|project)\b/i,
+  /\buse\b.+\b(?:workflow|process|rule|approach|template|system)\b/i,
+  /\b(?:source suggestions|memory review|approved memory|approved mind mirror|hermes)\b/i
+] as const;
 
 const CHAT_STOPWORDS = new Set([
   "about",
@@ -281,12 +302,20 @@ export async function sendChatMessage(
   const memoryPayload = extractMemoryPayloadFromUserMessage(normalized);
 
   if (memoryPayload.kind === "payload") {
-    const savedDraft = createDraftFromText(
-      memoryPayload.payload,
-      "chat",
-      memorySuggestionSourceLabel(persistedTurn.session.id, persistedTurn.userMessage.id),
-      options
-    );
+    const sourceLabel = memorySuggestionSourceLabel(persistedTurn.session.id, persistedTurn.userMessage.id);
+    if (isLongRememberPayload(memoryPayload.payload)) {
+      const savedDrafts = await createRememberedPayloadDrafts(
+        memoryPayload.payload,
+        sourceLabel,
+        providerError ? undefined : provider,
+        options
+      );
+      return savedDrafts.length > 0
+        ? { ...base, savedDrafts }
+        : { ...base, rememberedPayloadNoSuggestions: true };
+    }
+
+    const savedDraft = createDraftFromText(memoryPayload.payload, "chat", sourceLabel, options);
     return { ...base, savedDraft };
   }
 
@@ -694,6 +723,149 @@ function extractPayloadAfterRequestLine(userInput: string): string | undefined {
   return cleanMemoryPayload(lines.slice(requestLineIndex + 1).join("\n"));
 }
 
+async function createRememberedPayloadDrafts(
+  payload: string,
+  sourceLabel: string,
+  provider: ChatProvider | undefined,
+  options: HermesRuntimeOptions
+): Promise<MemoryDraft[]> {
+  const suggestions = await extractRememberedPayloadSuggestions(payload, provider, options);
+  return suggestions.map((suggestion) => createDraftFromText(suggestion, "chat", sourceLabel, options));
+}
+
+async function extractRememberedPayloadSuggestions(
+  payload: string,
+  provider: ChatProvider | undefined,
+  options: HermesRuntimeOptions
+): Promise<string[]> {
+  const existingMemories = collectExistingMemoryTexts(options);
+  const providerCandidates = provider?.extractSourceMemories
+    ? await tryExtractRememberedPayloadWithProvider(payload, provider, existingMemories)
+    : [];
+  const providerSuggestions = finalizeRememberedPayloadSuggestions(
+    providerCandidates.map((candidate) => candidate.content),
+    existingMemories
+  );
+
+  if (providerSuggestions.length > 0) {
+    return providerSuggestions;
+  }
+
+  return finalizeRememberedPayloadSuggestions(
+    extractDeterministicRememberedPayloadSuggestions(payload),
+    existingMemories
+  );
+}
+
+async function tryExtractRememberedPayloadWithProvider(
+  payload: string,
+  provider: ChatProvider,
+  existingMemories: string[]
+): Promise<SourceMemoryCandidate[]> {
+  try {
+    return await provider.extractSourceMemories!({
+      sourceId: 0,
+      sourceTitle: "Chat pasted memory",
+      chunks: chunkRememberedPayload(payload).map((content, index) => ({ chunkIndex: index, content })),
+      limit: REMEMBERED_PAYLOAD_LIMIT,
+      existingMemories: existingMemories.slice(0, 60)
+    });
+  } catch {
+    return [];
+  }
+}
+
+function extractDeterministicRememberedPayloadSuggestions(payload: string): string[] {
+  const suggestions: string[] = [];
+  for (const statement of splitRememberedPayloadStatements(payload)) {
+    if (!isUsefulRememberedCandidate(statement)) {
+      continue;
+    }
+    const cleaned = cleanMemoryPayload(statement);
+    if (cleaned) {
+      suggestions.push(cleaned);
+    }
+  }
+  return suggestions;
+}
+
+function splitRememberedPayloadStatements(payload: string): string[] {
+  const statements: string[] = [];
+  for (const rawLine of payload.split(/\n/)) {
+    const line = stripRememberedListMarker(rawLine.trim());
+    if (!line || isRememberedMetadataLine(line)) {
+      continue;
+    }
+
+    const pieces = line.split(/(?<=[.!?])\s+/).map((piece) => piece.trim()).filter(Boolean);
+    for (const piece of pieces.length > 0 ? pieces : [line]) {
+      const statement = toRememberedCandidateStatement(piece);
+      if (statement) {
+        statements.push(statement);
+      }
+    }
+  }
+  return statements;
+}
+
+function toRememberedCandidateStatement(value: string): string | undefined {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized || isUselessMemoryPayload(normalized)) {
+    return undefined;
+  }
+
+  const sentence = /[.!?]["'”)\]]?$/.test(normalized) ? normalized : `${normalized}.`;
+  if (sentence.length < MIN_REMEMBERED_CANDIDATE_CHARS || sentence.length > 360) {
+    return undefined;
+  }
+  if (wordCount(sentence) < MIN_REMEMBERED_CANDIDATE_WORDS) {
+    return undefined;
+  }
+  return sentence;
+}
+
+function finalizeRememberedPayloadSuggestions(
+  rawSuggestions: string[],
+  existingMemories: string[]
+): string[] {
+  const existingNormalized = existingMemories.map(normalizeForCompare).filter(Boolean);
+  const keptNormalized: string[] = [];
+  const scored: Array<{ content: string; score: number; order: number }> = [];
+
+  rawSuggestions.forEach((raw, order) => {
+    const cleaned = cleanMemoryPayload(raw);
+    if (!cleaned || !isUsefulRememberedCandidate(cleaned)) {
+      return;
+    }
+    const normalized = normalizeForCompare(cleaned);
+    if (
+      isNearDuplicate(normalized, existingNormalized) ||
+      isNearDuplicate(normalized, keptNormalized)
+    ) {
+      return;
+    }
+    keptNormalized.push(normalized);
+    scored.push({ content: cleaned, score: scoreRememberedCandidate(cleaned), order });
+  });
+
+  scored.sort((a, b) => b.score - a.score || a.order - b.order);
+  return scored.slice(0, REMEMBERED_PAYLOAD_LIMIT).map((entry) => entry.content);
+}
+
+function isLongRememberPayload(payload: string): boolean {
+  const paragraphs = payload.split(/\n\s*\n+/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const bulletLines = payload
+    .split(/\n/)
+    .filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line)).length;
+  const durableCandidates = extractDeterministicRememberedPayloadSuggestions(payload).length;
+  return (
+    payload.length >= LONG_REMEMBER_PAYLOAD_CHARS ||
+    paragraphs.length >= 2 ||
+    bulletLines >= 2 ||
+    durableCandidates >= 2
+  );
+}
+
 function createProviderMemorySuggestion(
   proposedContent: string,
   userInput: string,
@@ -827,6 +999,146 @@ function normalizePayloadPerspective(payload: string): string {
     .replace(/^My goal is\b/i, "James's goal is")
     .replace(/^I['’]?m working on\b/i, "James is working on")
     .trim();
+}
+
+function collectExistingMemoryTexts(options: HermesRuntimeOptions): string[] {
+  const approved = listApprovedMemories(options).map((memory) => memory.content);
+  const pending = listPendingDrafts(options).map((draft) => draft.proposed_content);
+  return [...approved, ...pending].map((text) => text.trim()).filter(Boolean);
+}
+
+function chunkRememberedPayload(payload: string): string[] {
+  const paragraphs = payload.split(/\n\s*\n+/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  if (paragraphs.length === 0) {
+    return [payload.trim()].filter(Boolean);
+  }
+
+  const chunks: string[] = [];
+  let buffer = "";
+  for (const paragraph of paragraphs) {
+    if (!buffer) {
+      buffer = paragraph;
+    } else if (buffer.length + paragraph.length + 2 <= 3000) {
+      buffer = `${buffer}\n\n${paragraph}`;
+    } else {
+      chunks.push(buffer);
+      buffer = paragraph;
+    }
+  }
+  if (buffer) {
+    chunks.push(buffer);
+  }
+  return chunks;
+}
+
+function stripRememberedListMarker(line: string): string {
+  return line.replace(/^(?:[-*+]\s+|\d+[.)]\s+|>\s+)/, "").trim();
+}
+
+function isRememberedMetadataLine(line: string): boolean {
+  const stripped = line.replace(/^#{1,6}\s*/, "").replace(/^\*+|\*+$/g, "").trim();
+  if (!stripped) {
+    return true;
+  }
+  if (/^#{1,6}\s/.test(line) || /^[-*_=]{3,}$/.test(line)) {
+    return true;
+  }
+  const letters = stripped.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 4 && stripped === stripped.toUpperCase() && !/[.!?]$/.test(stripped)) {
+    return true;
+  }
+
+  const keyValue = /^([A-Za-z][\w /-]{0,24}):\s*(.*)$/.exec(stripped);
+  if (!keyValue) {
+    return false;
+  }
+  const key = (keyValue[1] ?? "").trim().toLowerCase();
+  const value = (keyValue[2] ?? "").trim();
+  const metadataKeys = new Set([
+    "title",
+    "subtitle",
+    "purpose",
+    "created",
+    "date",
+    "updated",
+    "author",
+    "filename",
+    "file",
+    "source",
+    "version",
+    "status",
+    "tags",
+    "category",
+    "type",
+    "name",
+    "id"
+  ]);
+  return metadataKeys.has(key) || wordCount(value) < MIN_REMEMBERED_CANDIDATE_WORDS;
+}
+
+function isUsefulRememberedCandidate(candidate: string): boolean {
+  const cleaned = candidate.replace(/\s+/g, " ").trim();
+  if (
+    !cleaned ||
+    isUselessMemoryPayload(cleaned) ||
+    cleaned.length < MIN_REMEMBERED_CANDIDATE_CHARS ||
+    wordCount(cleaned) < MIN_REMEMBERED_CANDIDATE_WORDS ||
+    isRememberedMetadataLine(cleaned)
+  ) {
+    return false;
+  }
+  return scoreRememberedCandidate(cleaned) > 0;
+}
+
+function scoreRememberedCandidate(candidate: string): number {
+  return REMEMBERED_DURABLE_PATTERNS.reduce((sum, pattern) => sum + (pattern.test(candidate) ? 1 : 0), 0);
+}
+
+function normalizeForCompare(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isNearDuplicate(normalized: string, others: string[]): boolean {
+  if (!normalized) {
+    return false;
+  }
+  const tokens = new Set(normalized.split(" ").filter(Boolean));
+  for (const other of others) {
+    if (!other) {
+      continue;
+    }
+    if (other === normalized || other.includes(normalized) || normalized.includes(other)) {
+      return true;
+    }
+    const otherTokens = new Set(other.split(" ").filter(Boolean));
+    if (jaccardSimilarity(tokens, otherTokens) >= REMEMBERED_NEAR_DUPLICATE_JACCARD) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) {
+      intersection += 1;
+    }
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function wordCount(value: string): number {
+  const trimmed = value.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
 }
 
 function getUserChatMessageOrThrow(

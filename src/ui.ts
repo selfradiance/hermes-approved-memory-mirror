@@ -130,6 +130,17 @@ export async function handleUiRequest(
                 kind: "info",
                 message: "Paste the information you want remembered, and I’ll save it for review."
               }
+            : chatTurn.rememberedPayloadNoSuggestions
+              ? {
+                  kind: "info",
+                  message:
+                    "I didn’t find any strong standalone memories in that block. You can paste a shorter note or phrase one item directly."
+                }
+              : chatTurn.savedDrafts && chatTurn.savedDrafts.length > 0
+                ? {
+                    kind: "success",
+                    message: `Saved ${chatTurn.savedDrafts.length} memory suggestions for review.`
+                  }
             : chatTurn.providerError
             ? {
                 kind: "info",

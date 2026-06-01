@@ -29,7 +29,9 @@ import type {
   ChatGenerationInput,
   ChatGenerationResult,
   ChatProvider,
-  HermesRuntimeOptions
+  HermesRuntimeOptions,
+  SourceExtractionInput,
+  SourceMemoryCandidate
 } from "../src/types.js";
 
 const tempRoots: string[] = [];
@@ -60,6 +62,25 @@ class FakeApiProvider implements ChatProvider {
   async generate(input: ChatGenerationInput): Promise<ChatGenerationResult> {
     this.lastInput = input;
     return this.result;
+  }
+}
+
+class FakeExtractionChatProvider extends FakeApiProvider {
+  lastExtractionInput?: SourceExtractionInput;
+
+  constructor(
+    result: ChatGenerationResult,
+    private readonly extractionResult: SourceMemoryCandidate[] | Error
+  ) {
+    super(result);
+  }
+
+  async extractSourceMemories(input: SourceExtractionInput): Promise<SourceMemoryCandidate[]> {
+    this.lastExtractionInput = input;
+    if (this.extractionResult instanceof Error) {
+      throw this.extractionResult;
+    }
+    return this.extractionResult;
   }
 }
 
@@ -213,6 +234,88 @@ describe("chat provider abstraction", () => {
 
     expect(draft.proposed_content).not.toContain("Can you remember it all");
     expect(draft.status).toBe("pending");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("uses provider-assisted extraction for long remembered payloads", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const provider = new FakeExtractionChatProvider(
+      {
+        responseText: "I saved the useful parts for review.",
+        mode: "reflection",
+        ideaCandidates: []
+      },
+      [
+        {
+          content: "James prefers source suggestions to appear inline.",
+          category: "preference",
+          tags: ["source-suggestions"]
+        },
+        {
+          content: "Project Source Review should keep new memory suggestions under the source result.",
+          category: "project_note",
+          tags: ["source-review"]
+        },
+        {
+          content: "Can you remember all this?",
+          category: "general_note",
+          tags: []
+        }
+      ]
+    );
+
+    await sendChatMessage(
+      [
+        "Can you remember all this?",
+        "",
+        "I prefer source suggestions to appear inline because jumping between pages is annoying.",
+        "",
+        "Project Source Review should keep new memory suggestions under the source result.",
+        "",
+        "Use chat-local extraction when pasted memory payloads contain multiple durable items."
+      ].join("\n"),
+      { ...runtime(root), chatProvider: provider }
+    );
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(provider.lastExtractionInput?.sourceTitle).toBe("Chat pasted memory");
+    expect(drafts).toHaveLength(2);
+    expect(drafts.map((draft) => draft.proposed_content)).toContain("James prefers source suggestions to appear inline.");
+    expect(drafts.every((draft) => !draft.proposed_content.includes("Can you remember all this"))).toBe(true);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("falls back to deterministic extraction when provider extraction fails", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const provider = new FakeExtractionChatProvider(
+      {
+        responseText: "I can review that.",
+        mode: "reflection",
+        ideaCandidates: []
+      },
+      new Error("provider extraction failed")
+    );
+
+    await sendChatMessage(
+      [
+        "Can you remember all this?",
+        "",
+        "I prefer inline source suggestions because jumping between pages is annoying.",
+        "",
+        "Project Source Review should avoid hiding memory suggestions on another page.",
+        "",
+        "Use chat-local extraction for pasted notes and source extraction for imported files."
+      ].join("\n"),
+      { ...runtime(root), chatProvider: provider }
+    );
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(provider.lastExtractionInput).toBeDefined();
+    expect(drafts.length).toBeGreaterThan(1);
+    expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("inline source suggestions");
+    expect(drafts.every((draft) => !draft.proposed_content.includes("Can you remember all this"))).toBe(true);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 

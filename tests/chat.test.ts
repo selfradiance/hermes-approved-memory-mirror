@@ -200,6 +200,18 @@ describe("HERmes v0.2 chat", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 
+  it("extracts inline question remember payloads", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    await sendChatMessage("Can you remember this? I prefer inline source suggestions.", runtime(root));
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.proposed_content).toBe("James prefers inline source suggestions.");
+    expect(drafts[0]?.proposed_content).not.toContain("Can you remember this");
+  });
+
   it("extracts colon remember payloads", async () => {
     const root = makeProject();
     initHermes(runtime(root));
@@ -215,25 +227,58 @@ describe("HERmes v0.2 chat", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 
-  it("extracts multi-paragraph remember-it-all payloads", async () => {
+  it("extracts multiple suggestions from long multi-paragraph remember-it-all payloads", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const payload = [
+      "I prefer source suggestions to appear inline because jumping between pages is annoying.",
+      "",
+      "Project source review should keep newly suggested memories directly under the source result notice.",
+      "",
+      "Use the source extraction workflow for imported files, but use chat-local extraction for pasted remember-this blocks.",
+      "",
+      "The memory review flow should avoid one giant memory when the pasted block contains several durable points."
+    ].join("\n");
+    const turn = await sendChatMessage(
+      [
+        "Can you remember it all?",
+        "",
+        payload
+      ].join("\n"),
+      runtime(root)
+    );
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(turn.savedDrafts?.length).toBeGreaterThan(1);
+    expect(drafts.length).toBeGreaterThan(1);
+    expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("source suggestions");
+    expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("source extraction workflow");
+    expect(drafts.every((draft) => !draft.proposed_content.includes("Can you remember it all"))).toBe(true);
+    expect(drafts.every((draft) => draft.proposed_content.length < payload.length)).toBe(true);
+    expect(drafts.every((draft) => draft.status === "pending")).toBe(true);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("extracts useful suggestions from long bullet-list remember payloads", async () => {
     const root = makeProject();
     initHermes(runtime(root));
 
     await sendChatMessage(
       [
-        "Can you remember it all?",
-        "",
-        "The source review flow should keep suggestions inline on the Sources page.",
-        "",
-        "Jumping between pages makes memory review feel mechanical and easy to lose."
+        "Please remember this:",
+        "- I prefer inline source suggestions because jumping between pages is annoying.",
+        "- Project Source Review should avoid hiding new memory suggestions on a different page.",
+        "- Use the source extraction workflow for imported files and chat-local extraction for pasted notes."
       ].join("\n"),
       runtime(root)
     );
-    const [draft] = listPendingDrafts(runtime(root));
+    const drafts = listPendingDrafts(runtime(root));
 
-    expect(draft?.proposed_content).toContain("source review flow");
-    expect(draft?.proposed_content).toContain("Jumping between pages");
-    expect(draft?.proposed_content).not.toContain("Can you remember it all");
+    expect(drafts.length).toBeGreaterThan(1);
+    expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("inline source suggestions");
+    expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("Project Source Review");
+    expect(drafts.every((draft) => !draft.proposed_content.includes("Please remember this"))).toBe(true);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 

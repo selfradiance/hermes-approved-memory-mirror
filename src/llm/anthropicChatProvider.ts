@@ -39,6 +39,7 @@ export const SOURCE_EXTRACTION_PROMPT = [
   "Read all of the provided excerpts. Extract the strongest memories worth keeping long term: stable preferences, project direction, identity anchors, recurring principles, workflows, decision patterns, health and training patterns, creative direction, finance or Bitcoin thesis, and AI or coding principles.",
   "Ignore document metadata such as the title, filename, creation date, \"purpose\" lines, and headings (for example \"MASTER IDENTITY DOCUMENT\") unless the line itself states a durable fact.",
   "Do not summarize the document. Do not propose vague fragments, bare labels, headings, or trivial facts.",
+  "If the text includes a request such as \"remember this\" or \"can you remember all this\", treat that as instruction text only and never return it as a memory.",
   "Do not repeat memories the user already has. Skip anything that duplicates or closely restates a listed existing memory.",
   "Each suggestion must be a complete, standalone sentence that makes sense on its own.",
   "Return exactly the requested number of suggestions when there is enough strong material. If there is less, return only the genuinely strong ones rather than padding with weak ones.",

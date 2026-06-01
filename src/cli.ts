@@ -48,7 +48,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.4.4");
+    .version("0.4.5");
 
   program
     .command("init")
@@ -222,6 +222,10 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
       }
       if (latestTurn.memoryRequestNeedsPayload) {
         out("Paste the information you want remembered, and I will save it for review.");
+      } else if (latestTurn.rememberedPayloadNoSuggestions) {
+        out("I did not find any strong standalone memories in that block. Paste a shorter note or phrase one item directly.");
+      } else if (latestTurn.savedDrafts && latestTurn.savedDrafts.length > 0) {
+        out(`Saved ${latestTurn.savedDrafts.length} memory suggestions for review.`);
       } else if (latestTurn.savedDraft) {
         out("Saved as a draft. Review and approve it before it becomes memory.");
       } else if (latestTurn.memorySuggestion) {
