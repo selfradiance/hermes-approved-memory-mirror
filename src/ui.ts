@@ -142,8 +142,7 @@ export async function handleUiRequest(
       const session = createChatSession(runtime, "Web chat");
       return htmlResponse(
         renderPage(runtime, {
-          activeSessionId: session.id,
-          notice: { kind: "info", message: "Started a new local chat session." }
+          activeSessionId: session.id
         })
       );
     }
@@ -349,10 +348,16 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       font-size: 1.75rem;
       letter-spacing: 0;
     }
-    .tagline {
-      margin: 5px 0 0;
-      color: var(--muted);
-      font-size: 0.96rem;
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
     .mode-label {
       margin: 0 0 14px;
@@ -694,7 +699,6 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
     <header class="app-header">
       <div>
         <h1>HERmes</h1>
-        <p class="tagline">Your memories stay local. Only approved memories are used. No outside actions.</p>
       </div>
       <nav class="top-actions" aria-label="App actions">
         <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
@@ -708,17 +712,10 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 
     <section class="chat-card" id="chat">
       <div class="chat-head">
-        <div>
-          <h2>Chat</h2>
-          <p class="hint">${model.approvedMemories.length} approved ${
-            model.approvedMemories.length === 1 ? "memory" : "memories"
-          }</p>
-        </div>
         <form method="post" action="/chat/new">
           <button class="secondary" type="submit"${model.canReadMemory ? "" : " disabled"}>New Chat</button>
         </form>
       </div>
-      <p class="hint">HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it.</p>
       ${
         model.approvedMemories.length === 0
           ? `<div class="onboarding">
@@ -1113,11 +1110,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
 
   return `<div class="chat-shell">
     <div class="chat-thread" aria-live="polite">
-      ${
-        model.chatMessages.length > 0
-          ? model.chatMessages.map((message) => renderChatMessage(message, model.approvedMemories)).join("")
-          : `<p class="empty">No chat messages yet. Start with an idea, question, or "what does this make you think of?"</p>`
-      }
+      ${model.chatMessages.map((message) => renderChatMessage(message, model.approvedMemories)).join("")}
     </div>
 
     ${model.latestMemorySuggestion ? renderMemorySuggestion(model.latestMemorySuggestion) : ""}
@@ -1125,8 +1118,8 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
     <form class="chat-compose" method="post" action="/chat/send">
       ${sessionInput}
       <label>
-        Message
-        <textarea name="message" required${disabled} placeholder="Ask HERmes to mirror an idea, connect it to memory, or generate directions."></textarea>
+        <span class="sr-only">Message</span>
+        <textarea name="message" required${disabled} placeholder="Message HERmes…"></textarea>
       </label>
       <div class="chat-toolbar">
         <div class="actions">

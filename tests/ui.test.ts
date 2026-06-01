@@ -71,12 +71,25 @@ describe("HERmes Local Web Chat UI", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("Review memory suggestions");
     expect(html).toContain("Save for review");
-    expect(html).toContain(
-      "HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it."
-    );
     expect(html).not.toContain(">Create draft<");
     expect(html).not.toContain(">Save as draft<");
     expect(html).not.toContain("Review drafts");
+  });
+
+  it("keeps the default chat surface minimal and free of removed copy", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).not.toContain("Your memories stay local.");
+    expect(html).not.toContain("Only approved memories are used.");
+    expect(html).not.toContain("No outside actions.");
+    expect(html).not.toContain("HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it.");
+    expect(html).not.toContain("No chat messages yet.");
+    expect(html).not.toContain("Started a new local chat session.");
+    expect(html).toContain('placeholder="Message HERmes…"');
   });
 
   it("keeps database and internal language off the default chat page", async () => {
