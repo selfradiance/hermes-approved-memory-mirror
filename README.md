@@ -102,7 +102,8 @@ In the UI:
 5. Save the latest exchange for review.
 6. Review memory suggestions, then approve a memory or dismiss it.
 7. Add a note and save it for review.
-8. Open `Diagnostics` (small footer link to `/system`) only when you want diagnostics, search, deterministic reflection, or local JSON export.
+8. Open **Manage memories** (link in the top navigation, page at `/memories`) to search, edit, or retire your approved memories, and to inspect retired/superseded ones.
+9. Open `Diagnostics` (small footer link to `/system`) only when you want setup diagnostics, deterministic reflection, or local JSON export.
 
 Only approved memories are used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve a memory.
 
@@ -135,7 +136,9 @@ After you save, Approved Mind Mirror says "Saved for review. Approve it when you
 
 The direct **Add memory** form is meant for short durable notes and preferences. If you paste a long, multi-paragraph, or source-like note there, Approved Mind Mirror now asks how you want to handle it: split it into memory suggestions, import it as a source, or save it as one memory anyway. Any memory-shaped result still waits for explicit approval.
 
-Approved memories can also be corrected or retired through explicit human action in the local UI. Editing an approved memory creates a new approved replacement and retires the prior version from normal retrieval; retiring a memory keeps a local tombstone instead of hard-deleting it. Retired and superseded memories are inspectable, but they are excluded from normal chat retrieval, search, reflection, and JSON export by default.
+Approved memories can also be corrected or retired through explicit human action on the **Manage memories** page (linked in the top navigation, served at `/memories`). Editing an approved memory creates a new approved replacement and retires the prior version from normal retrieval; retiring a memory keeps a local tombstone instead of hard-deleting it. Retired and superseded memories are inspectable from the same page (`/memories?retired=1`), but they are excluded from normal chat retrieval, search, reflection, and JSON export by default. Nothing is ever hard-deleted automatically, and there is no automatic cleanup or staleness detection — edit and retire are explicit human actions only.
+
+(As of v0.4.8 these controls live on the dedicated Manage memories page reachable from the main navigation. Earlier they were only reachable through the Diagnostics/System page, which made them hard to find.)
 
 Flow:
 

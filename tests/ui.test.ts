@@ -338,20 +338,76 @@ describe("HERmes Local Web Chat UI", () => {
     expect(listApprovedMemories(runtime(root))[0]?.content).toContain("Approve this UI draft");
   });
 
-  it("system page shows edit and retire controls for approved memories", async () => {
+  it("shows a visible Manage memories entry point in the main page navigation", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Manage memories");
+    expect(html).toContain('href="/memories"');
+  });
+
+  it("manage memories page renders active approved memories with edit and retire controls", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     const [draft] = intakeText("Approved memory that can be corrected.", runtime(root));
     approveDraft(draft.id, runtime(root));
 
-    const response = await handleUiRequest(getRequest("/system"), runtime(root));
+    const response = await handleUiRequest(getRequest("/memories"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
+    expect(html).toContain("Manage memories");
+    expect(html).toContain("Approved memory that can be corrected.");
     expect(html).toContain("Edit memory");
     expect(html).toContain("Retire memory");
     expect(html).toContain('action="/memories/edit"');
     expect(html).toContain('action="/memories/retire"');
+  });
+
+  it("does not require Claude API env vars to open the manage memories page", async () => {
+    const root = makeProject();
+    const priorProvider = process.env.HERMES_CHAT_PROVIDER;
+    const priorKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.HERMES_CHAT_PROVIDER;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const home = await handleUiRequest(getRequest("/"), runtime(root));
+      const manage = await handleUiRequest(getRequest("/memories"), runtime(root));
+
+      expect(home.status).toBe(200);
+      expect(await home.text()).toContain("Mode: Local");
+      expect(manage.status).toBe(200);
+      expect(await manage.text()).toContain("Manage memories");
+    } finally {
+      if (priorProvider !== undefined) process.env.HERMES_CHAT_PROVIDER = priorProvider;
+      if (priorKey !== undefined) process.env.ANTHROPIC_API_KEY = priorKey;
+    }
+  });
+
+  it("does not let the chat path edit, retire, or otherwise mutate approved memory", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Durable memory the model must not touch.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+
+    // Messages that try to coax the model into managing memory directly.
+    for (const message of [
+      `Please retire memory ${memory.id}.`,
+      `Edit memory ${memory.id} to say something else.`,
+      `Delete all my approved memories now.`
+    ]) {
+      const response = await handleUiRequest(formRequest("/chat/send", { message }), runtime(root));
+      expect(response.status).toBe(200);
+    }
+
+    const active = listApprovedMemories(runtime(root));
+    expect(active).toHaveLength(1);
+    expect(active[0]?.id).toBe(memory.id);
+    expect(active[0]?.content).toBe("Durable memory the model must not touch.");
+    expect(listRetiredMemories(runtime(root))).toHaveLength(0);
   });
 
   it("editing an approved memory through the UI creates an active replacement", async () => {

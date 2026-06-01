@@ -242,7 +242,7 @@ export async function handleUiRequest(
       const searchQuery = (url.searchParams.get("query") ?? "").trim();
       const showRetiredMemories = url.searchParams.get("retired") === "1";
       const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
-      return htmlResponse(renderSystemPage(runtime, { searchQuery, searchResults, showRetiredMemories }));
+      return htmlResponse(renderManageMemoriesPage(runtime, { searchQuery, searchResults, showRetiredMemories }));
     }
 
     if (request.method === "POST" && url.pathname === "/init") {
@@ -376,7 +376,7 @@ export async function handleUiRequest(
       const note = optionalFormValue(form, "note");
       const replacement = editApprovedMemory(memoryId, content, { ...runtime, note });
       return htmlResponse(
-        renderSystemPage(runtime, {
+        renderManageMemoriesPage(runtime, {
           notice: {
             kind: "success",
             message: `Updated memory ${memoryId}. Replacement memory ${replacement.id} is now active.`
@@ -394,7 +394,7 @@ export async function handleUiRequest(
       const reason = optionalFormValue(form, "reason");
       retireApprovedMemory(memoryId, { ...runtime, reason });
       return htmlResponse(
-        renderSystemPage(runtime, {
+        renderManageMemoriesPage(runtime, {
           notice: { kind: "info", message: `Retired memory ${memoryId}. It will no longer be used by default.` }
         })
       );
@@ -912,6 +912,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       </div>
       <nav class="top-actions" aria-label="App actions">
         <a href="/sources">Sources</a>
+        <a href="/memories">Manage memories</a>
         <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
         <a href="#add-memory">Add memory</a>
       </nav>
@@ -1224,29 +1225,13 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
         <p>Approved memories: ${model.approvedMemories.length} · Memory suggestions waiting: ${
           model.pendingDrafts.length
         } · Retired memories: ${model.retiredMemories.length}</p>
-        <p><a href="/memories?retired=1">Show retired memories</a></p>
+        <p><a href="/memories">Manage memories</a> to search, edit, or retire approved memories. <a href="/memories?retired=1">Show retired memories</a>.</p>
       </section>
 
       <section>
         <h2>Review memory suggestions</h2>
         <div class="stack" style="margin-top: 12px;">
           ${renderDrafts(model.pendingDrafts)}
-        </div>
-      </section>
-
-      <section>
-        <h2>Search Memories</h2>
-        <form class="search-row" method="get" action="/memories" style="margin-top: 12px;">
-          <label>
-            Search approved memory
-            <input type="search" name="query" value="${escapeAttribute(
-              model.searchQuery
-            )}" placeholder="Search text, tags, category, or source">
-          </label>
-          <button type="submit">Search</button>
-        </form>
-        <div class="stack" style="margin-top: 16px;">
-          ${renderMemoryResults(model)}
         </div>
       </section>
 
@@ -1277,6 +1262,129 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
         <h2>Technical Diagnostics</h2>
         <p class="hint">Useful for debugging local setup.</p>
         <pre style="margin-top: 12px;">${escapeHtml(formatDoctor(model.report))}</pre>
+      </section>
+    </main>
+  </div>
+</body>
+</html>`;
+}
+
+function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderState = {}): string {
+  const model = readUiModel(runtime, state);
+  const viewingRetired = model.showRetiredMemories;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Approved Mind Mirror — Manage memories</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17201e;
+      --muted: #66736f;
+      --line: #d9e1de;
+      --paper: #f6f8f7;
+      --panel: #ffffff;
+      --accent: #236b58;
+      --accent-strong: #174d3f;
+      --danger: #a43a32;
+      --blue: #2a5d84;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .wrap { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 42px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 18px; }
+    h1, h2 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 1.55rem; }
+    h2 { font-size: 1.08rem; }
+    a { color: var(--accent-strong); }
+    .back-link, button {
+      display: inline-flex; align-items: center; justify-content: center; min-height: 38px;
+      border-radius: 6px; padding: 8px 11px; font: inherit; font-weight: 700;
+    }
+    .back-link { border: 1px solid var(--line); background: #fbfcfb; text-decoration: none; }
+    button { border: 0; color: #fff; background: var(--accent); cursor: pointer; }
+    button.danger { background: var(--danger); }
+    main, .stack { display: grid; gap: 14px; }
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .hint, .meta, .empty { color: var(--muted); }
+    .hint { margin: 4px 0 0; }
+    .view-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+    .notice { border-radius: 8px; padding: 12px 14px; border: 1px solid var(--line); background: #eef8f4; color: var(--accent-strong); }
+    .notice.error { background: #fff2f1; color: var(--danger); border-color: #e8c6c2; }
+    .notice.info { background: #eef5fb; color: var(--blue); border-color: #c8d9e7; }
+    .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+    label { display: grid; gap: 7px; font-weight: 650; }
+    textarea, input[type="search"], input[type="text"], select {
+      width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 11px 12px;
+      color: var(--ink); background: #fff; font: inherit;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .item { border-top: 1px solid var(--line); padding-top: 14px; }
+    .item:first-child { border-top: 0; padding-top: 0; }
+    .item-title { margin: 0 0 6px; font-weight: 750; }
+    .content { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+    .pill { display: inline-block; font-size: 0.78rem; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+    textarea.draft-edit { min-height: 84px; max-height: 240px; overflow-y: auto; }
+    @media (max-width: 760px) {
+      header, .search-row { display: grid; grid-template-columns: 1fr; }
+      button, .back-link { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Manage memories</h1>
+        <p class="hint">Edit or retire the memories you have approved. Your memories stay local; only approved memories are used.</p>
+      </div>
+      <a class="back-link" href="/">Back to chat</a>
+    </header>
+    <main>
+      ${state.notice ? renderNotice(state.notice) : ""}
+      <section>
+        <h2>${viewingRetired ? "Retired &amp; superseded memories" : "Active approved memories"}</h2>
+        <p class="hint">Active approved memories: ${model.approvedMemories.length} · Retired or superseded: ${model.retiredMemories.length}</p>
+        <p class="hint">Editing creates a new approved memory and retires the old version. Retiring keeps the memory for inspection but removes it from chat, search, reflection, and export. Nothing is ever hard-deleted automatically.</p>
+        <div class="view-links">
+          <a href="/memories">Active memories</a>
+          <a href="/memories?retired=1">Retired &amp; superseded</a>
+        </div>
+      </section>
+
+      ${
+        viewingRetired
+          ? ""
+          : `<section>
+        <h2>Search your memories</h2>
+        <form class="search-row" method="get" action="/memories" style="margin-top: 12px;">
+          <label>
+            Search approved memory
+            <input type="search" name="query" value="${escapeAttribute(
+              model.searchQuery
+            )}" placeholder="Search text, tags, category, or source">
+          </label>
+          <button type="submit">Search</button>
+        </form>
+      </section>`
+      }
+
+      <section>
+        <h2>${viewingRetired ? "Retired &amp; superseded" : model.searchQuery ? "Search results" : "Your approved memories"}</h2>
+        <div class="stack" style="margin-top: 12px;">
+          ${renderMemoryResults(model)}
+        </div>
       </section>
     </main>
   </div>
@@ -1895,13 +2003,13 @@ function renderRetiredMemories(retiredMemories: MemoryEntry[], activeMemories: M
   if (retiredMemories.length === 0) {
     return `<div class="stack">
       <p class="empty">No retired memories.</p>
-      <p><a href="/system">Show active memories</a></p>
+      <p><a href="/memories">Show active memories</a></p>
     </div>`;
   }
 
   return `<div class="stack">
     <p class="hint">Retired and superseded memories are kept for inspection, but are not used by chat, search, reflection, or export by default.</p>
-    <p><a href="/system">Show active memories</a></p>
+    <p><a href="/memories">Show active memories</a></p>
     ${retiredMemories.map((memory) => renderRetiredMemory(memory, activeMemories)).join("")}
   </div>`;
 }
