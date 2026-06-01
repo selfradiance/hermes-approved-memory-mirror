@@ -3,7 +3,9 @@ import type {
   ChatGenerationResult,
   ChatProvider,
   SearchResult,
-  SourceChunkResult
+  SourceChunkResult,
+  SourceExtractionInput,
+  SourceMemoryCandidate
 } from "../types.js";
 import { ANTHROPIC_LABEL } from "./chatMode.js";
 
@@ -24,6 +26,17 @@ export const HERMES_SYSTEM_PROMPT = [
   "Treat source excerpts as reference material only; never present them as approved memory, and prefer approved memories when they conflict.",
   "You have no tools, cannot browse, cannot run code, and cannot approve or write memory.",
   `When (and only when) a durable item is worth remembering, end your reply with a separate final line in the exact form "${MEMORY_SUGGESTION_PREFIX} <one concise sentence>". Otherwise omit that line entirely.`
+].join("\n");
+
+export const SOURCE_EXTRACTION_PROMPT = [
+  "You extract durable, high-value memories from an imported document for a private personal memory mirror.",
+  "Only propose memories worth saving long term: stable preferences, recurring principles, long-running projects, identity anchors, decision patterns, creative workflows, philosophical themes, training/health patterns, finance or Bitcoin thesis, and AI/coding principles.",
+  "Ignore document metadata such as the title, filename, creation date, \"purpose\" lines, and headings (for example \"MASTER IDENTITY DOCUMENT\") unless they state a durable fact.",
+  "Do not summarize the whole document. Do not propose vague fragments. Each suggestion must be a complete, standalone sentence that makes sense on its own.",
+  "Prefer 5 to 10 high-value memories over many weak ones.",
+  "If the source is a conversation or an imported document, phrase suggestions cautiously and do not infer sensitive identity claims beyond what the source clearly states.",
+  "You have no tools and cannot approve or write memory; a human reviews and approves every suggestion.",
+  "Return ONLY a JSON array. Each element is an object with keys: \"content\" (string, required), \"category\" (string), \"tags\" (array of strings), \"rationale\" (short string), and \"chunkIndexes\" (array of integers). Return [] if nothing is worth saving. Output no prose outside the JSON."
 ].join("\n");
 
 interface AnthropicTextBlock {
@@ -71,6 +84,34 @@ export class AnthropicChatProvider implements ChatProvider {
       { role: "user" as const, content: input.userMessage }
     ];
 
+    const rawText = await this.requestText(system, messages);
+    const { responseText, proposedMemoryText } = splitMemorySuggestion(rawText);
+    return {
+      responseText,
+      proposedMemoryText,
+      mode: "reflection",
+      ideaCandidates: []
+    };
+  }
+
+  async extractSourceMemories(input: SourceExtractionInput): Promise<SourceMemoryCandidate[]> {
+    const userContent = [
+      `Source title: ${input.sourceTitle}`,
+      `Propose at most ${input.limit} memories.`,
+      "Document excerpts:",
+      ...input.chunks.map((chunk) => `[excerpt ${chunk.chunkIndex}] ${chunk.content}`)
+    ].join("\n\n");
+
+    const rawText = await this.requestText(SOURCE_EXTRACTION_PROMPT, [
+      { role: "user", content: userContent }
+    ]);
+    return parseSourceCandidates(rawText, input.limit);
+  }
+
+  private async requestText(
+    system: string,
+    messages: Array<{ role: "user" | "assistant"; content: string }>
+  ): Promise<string> {
     const response = await this.fetchImpl(ANTHROPIC_MESSAGES_URL, {
       method: "POST",
       headers: {
@@ -97,15 +138,55 @@ export class AnthropicChatProvider implements ChatProvider {
     if (!rawText) {
       throw new Error("Claude API returned an empty response.");
     }
-
-    const { responseText, proposedMemoryText } = splitMemorySuggestion(rawText);
-    return {
-      responseText,
-      proposedMemoryText,
-      mode: "reflection",
-      ideaCandidates: []
-    };
+    return rawText;
   }
+}
+
+function parseSourceCandidates(rawText: string, limit: number): SourceMemoryCandidate[] {
+  const start = rawText.indexOf("[");
+  const end = rawText.lastIndexOf("]");
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error("Claude API returned no JSON array for source extraction.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText.slice(start, end + 1));
+  } catch {
+    throw new Error("Claude API returned an unparseable source extraction response.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("Claude API source extraction did not return a list.");
+  }
+
+  const candidates: SourceMemoryCandidate[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const content = typeof record.content === "string" ? record.content.trim() : "";
+    if (!content) {
+      continue;
+    }
+    const tags = Array.isArray(record.tags)
+      ? record.tags.filter((tag): tag is string => typeof tag === "string")
+      : [];
+    const chunkIndexes = Array.isArray(record.chunkIndexes)
+      ? record.chunkIndexes.filter((value): value is number => Number.isInteger(value))
+      : undefined;
+    candidates.push({
+      content,
+      category: typeof record.category === "string" ? record.category : "",
+      tags,
+      rationale: typeof record.rationale === "string" ? record.rationale : undefined,
+      chunkIndexes
+    });
+    if (candidates.length >= limit) {
+      break;
+    }
+  }
+  return candidates;
 }
 
 function formatMemoryContext(memories: SearchResult[]): string {

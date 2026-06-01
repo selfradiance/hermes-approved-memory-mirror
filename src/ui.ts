@@ -22,7 +22,8 @@ import {
   listPendingDrafts,
   reflectOnApprovedMemory,
   rejectDraft,
-  searchApprovedMemories
+  searchApprovedMemories,
+  updateDraftProposedContent
 } from "./hermes.js";
 import {
   getSource,
@@ -241,6 +242,10 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/drafts/approve") {
       const form = await readForm(request);
       const draftId = parseDraftId(requiredFormValue(form, "draftId", "Memory id is required."));
+      const editedContent = (form.get("content") ?? "").trim();
+      if (editedContent) {
+        updateDraftProposedContent(draftId, editedContent, runtime);
+      }
       approveDraft(draftId, runtime);
       return htmlResponse(
         renderPage(runtime, {
@@ -313,7 +318,8 @@ export async function handleUiRequest(
         requiredFormValue(form, "sourceId", "Source id is required."),
         "Source id"
       );
-      const drafts = suggestMemoriesFromSource(sourceId, runtime);
+      const limit = parseOptionalPositiveInteger(form.get("limit") ?? "");
+      const drafts = await suggestMemoriesFromSource(sourceId, { ...runtime, limit });
       return htmlResponse(
         renderSourcesPage(runtime, {
           selectedSourceId: sourceId,
@@ -321,10 +327,10 @@ export async function handleUiRequest(
             kind: drafts.length > 0 ? "success" : "info",
             message:
               drafts.length > 0
-                ? `Saved ${drafts.length} memory suggestion${
-                    drafts.length === 1 ? "" : "s"
-                  } for review. Approve each one when you’re ready.`
-                : "No clear durable statements were found in this source to suggest."
+                ? `Suggested ${drafts.length} memor${
+                    drafts.length === 1 ? "y" : "ies"
+                  } for review. Approve or edit each one when you’re ready.`
+                : "No durable, standalone statements were found in this source to suggest."
           }
         })
       );
@@ -597,6 +603,11 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       margin: 0;
+    }
+    textarea.draft-edit {
+      min-height: 84px;
+      max-height: 240px;
+      overflow-y: auto;
     }
     pre {
       overflow-x: auto;
@@ -1043,6 +1054,11 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
       overflow-wrap: anywhere;
       margin: 0;
     }
+    textarea.draft-edit {
+      min-height: 84px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
     @media (max-width: 760px) {
       header,
       .search-row {
@@ -1191,10 +1207,13 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     .notice.info { background: #eef5fb; color: var(--blue); border-color: #c8d9e7; }
     .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
     label { display: grid; gap: 7px; font-weight: 650; }
-    input[type="search"], input[type="text"], input[type="file"] {
+    input[type="search"], input[type="text"], input[type="file"], input[type="number"] {
       width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 11px 12px;
       color: var(--ink); background: #fff; font: inherit;
     }
+    .suggest-form { display: grid; gap: 8px; }
+    .suggest-count { max-width: 280px; }
+    .suggest-count input[type="number"] { width: 96px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .item { border-top: 1px solid var(--line); padding-top: 14px; }
     .item:first-child { border-top: 0; padding-top: 0; }
@@ -1311,8 +1330,11 @@ function renderSourceList(sources: SourceSummary[]): string {
       )} · Excerpts: ${source.chunk_count}</p>
       <div class="actions" style="margin-top: 10px;">
         <a class="back-link" href="/sources?source=${source.id}">View excerpts</a>
-        <form method="post" action="/sources/suggest">
+        <form class="suggest-form" method="post" action="/sources/suggest">
           <input type="hidden" name="sourceId" value="${source.id}">
+          <label class="suggest-count">Number of memory suggestions
+            <input type="number" name="limit" min="1" max="10" value="7">
+          </label>
           <button class="secondary" type="submit">Suggest memories from this source</button>
         </form>
       </div>
@@ -1564,22 +1586,30 @@ function renderDrafts(drafts: MemoryDraft[]): string {
 }
 
 function renderDraft(draft: MemoryDraft): string {
+  const sourceLine =
+    draft.source_type === "source"
+      ? `<p class="meta">From ${escapeHtml(draft.source_label)}</p>`
+      : "";
   return `<article class="item">
     <p class="item-title"><span>Memory suggestion</span></p>
     <p class="meta">Suggested as ${escapeHtml(draft.proposed_category)} · Tags: ${escapeHtml(
       formatTags(draft.proposed_tags_json)
     )}</p>
-    <p class="content">${escapeHtml(draft.proposed_content)}</p>
-    <div class="actions" style="margin-top: 12px;">
-      <form method="post" action="/drafts/approve">
-        <input type="hidden" name="draftId" value="${draft.id}">
+    ${sourceLine}
+    <form class="stack" method="post" action="/drafts/approve" style="margin-top: 10px;">
+      <input type="hidden" name="draftId" value="${draft.id}">
+      <label>
+        Memory text
+        <textarea class="draft-edit" name="content" rows="4">${escapeHtml(draft.proposed_content)}</textarea>
+      </label>
+      <div class="actions">
         <button type="submit">Approve memory</button>
-      </form>
-      <form method="post" action="/drafts/reject">
-        <input type="hidden" name="draftId" value="${draft.id}">
-        <button class="danger" type="submit">Dismiss</button>
-      </form>
-    </div>
+      </div>
+    </form>
+    <form method="post" action="/drafts/reject" style="margin-top: 8px;">
+      <input type="hidden" name="draftId" value="${draft.id}">
+      <button class="danger" type="submit">Dismiss</button>
+    </form>
   </article>`;
 }
 

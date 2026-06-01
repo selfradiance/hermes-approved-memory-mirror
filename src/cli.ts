@@ -48,7 +48,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.4.0");
+    .version("0.4.1");
 
   program
     .command("init")

@@ -75,11 +75,43 @@ export function createDraftFromText(
   options: HermesRuntimeOptions = {}
 ): MemoryDraft {
   const proposal = createDraftProposalFromText(text, sourceType, sourceLabel);
+  return createDraftFromProposal(proposal, options);
+}
+
+export function createDraftFromProposal(
+  proposal: DraftProposal,
+  options: HermesRuntimeOptions = {}
+): MemoryDraft {
   const [draft] = insertDraftProposals([proposal], options);
   if (!draft) {
     throw new Error("Expected draft creation to return one pending draft.");
   }
   return draft;
+}
+
+export function updateDraftProposedContent(
+  draftId: number,
+  content: string,
+  options: HermesRuntimeOptions = {}
+): MemoryDraft {
+  const normalized = content.trim();
+  if (!normalized) {
+    throw new Error("Memory text cannot be empty.");
+  }
+  const db = openExistingDb(options);
+  try {
+    const update = db.transaction(() => {
+      getPendingDraftOrThrow(db, draftId);
+      db.prepare("UPDATE memory_drafts SET proposed_content = ? WHERE id = ? AND status = 'pending'").run(
+        normalized,
+        draftId
+      );
+      return getDraftByIdOrThrow(db, draftId);
+    });
+    return update();
+  } finally {
+    db.close();
+  }
 }
 
 export function intakeFile(

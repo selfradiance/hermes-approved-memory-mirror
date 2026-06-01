@@ -8,7 +8,7 @@ Approved Mind Mirror (internal/codename HERmes) is a local approved-memory mirro
 - `src/chat.ts` contains deterministic chat response, idea mode, organic memory suggestion, chat persistence logic, the `DeterministicChatProvider`, and `resolveChatProvider`.
 - `src/ui.ts` contains the loopback-only HTTP server and server-rendered local web chat/review UI.
 - `src/hermes.ts` contains the memory workflow operations.
-- `src/sources.ts` contains the source library: import (deterministic chunking, content hash, size limit), listing, search, source-grounded memory suggestions, and chat retrieval of relevant source excerpts.
+- `src/sources.ts` contains the source library: import (deterministic chunking, content hash, size limit), listing, search, source-grounded memory suggestions (deterministic extraction plus optional provider-assisted extraction with deterministic fallback), and chat retrieval of relevant source excerpts.
 - `src/db.ts` owns database path resolution, schema creation, and SQLite access.
 - `src/draftGeneration.ts` contains deterministic draft proposal logic.
 - `src/format.ts` formats CLI output.
@@ -62,6 +62,15 @@ source import -> source library (sources/source_chunks) -> source excerpts -> me
 ```
 
 Sources may be imported, searched, viewed, and used to propose memory suggestions, and relevant excerpts may be retrieved into chat context. None of these paths write `memory_entries`. The approval boundary is unchanged: only explicit `approveDraft` creates approved memory. The model may read selected source excerpts and approved memories to generate a response; it may not approve memory, execute tools, browse, access accounts, schedule work, or write approved memory directly. File import reads only the file the user explicitly selects (read client-side in the browser and posted as text); it never crawls or reads arbitrary filesystem paths, and a per-file size limit (~1 MB of text) applies.
+
+### Source memory extraction (v0.4.1)
+
+`suggestMemoriesFromSource` is the quality pass that turns raw source chunks into save-for-review suggestions. It resolves a candidate count (default 7, clamped 1–10) and produces `SourceMemoryCandidate`s (content, category, tags, optional rationale, optional chunk indexes) through two routes:
+
+- **Deterministic extraction** (`extractDeterministicSourceMemories`) is the default and the always-available fallback. It splits chunk text into statements, drops document metadata (markdown/all-caps headings, `Title:`/`Purpose:`/`Created:`/filename lines, and short `Label: value` fragments such as "Dynamics: Not tribal."), keeps only complete standalone sentences (capitalized start, terminal punctuation, minimum length/word count) that match durable-context signals, dedupes, and ranks by signal strength.
+- **Provider-assisted extraction** is used only when a chat provider exposing `extractSourceMemories` is configured (`HERMES_CHAT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`, or an injected provider in tests). `AnthropicChatProvider.extractSourceMemories` sends the source excerpts as text with `SOURCE_EXTRACTION_PROMPT` (JSON-array-only contract) and parses the response defensively. Any error, empty result, or unparseable output falls back to deterministic extraction.
+
+Each candidate becomes a pending draft via `createDraftFromProposal` with `source_type = "source"`. The provider receives text only, gets no tools, and cannot approve or write memory. The approval boundary is unchanged: only explicit `approveDraft` writes `memory_entries`, and the review UI lets a human edit a suggestion (`updateDraftProposedContent`) before approving it. The API key is read from the environment for the single model call only and is never stored, logged, rendered, or exported.
 
 ## User-Facing Language vs. Internal Storage
 

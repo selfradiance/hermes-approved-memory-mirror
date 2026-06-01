@@ -30,10 +30,26 @@ export interface ChatGenerationResult {
   ideaCandidates: IdeaCandidate[];
 }
 
+export interface SourceMemoryCandidate {
+  content: string;
+  category: string;
+  tags: string[];
+  rationale?: string;
+  chunkIndexes?: number[];
+}
+
+export interface SourceExtractionInput {
+  sourceId: number;
+  sourceTitle: string;
+  chunks: Array<{ chunkIndex: number; content: string }>;
+  limit: number;
+}
+
 export interface ChatProvider {
   readonly id: ChatProviderId;
   readonly label: string;
   generate(input: ChatGenerationInput): Promise<ChatGenerationResult>;
+  extractSourceMemories?(input: SourceExtractionInput): Promise<SourceMemoryCandidate[]>;
 }
 
 export interface HermesPaths {

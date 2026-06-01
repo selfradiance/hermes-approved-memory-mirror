@@ -156,7 +156,16 @@ In the `Sources` page (linked from the chat header) you can:
 2. See your sources with title, filename, import date, and excerpt count.
 3. Search inside your sources.
 4. View a source's excerpts.
-5. Use **Suggest memories from this source** to create save-for-review items. These are never auto-approved; approval still happens through the review flow.
+5. Use **Suggest memories from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it.
+
+### How source memory extraction works (v0.4.1)
+
+Imported sources are raw material, not memories. **Suggest memories from this source** distills them into durable, standalone suggestions that you must still approve.
+
+- **Local mode (default):** a deterministic pass keeps complete, standalone sentences that signal durable personal or project context (stable preferences, recurring principles, long-running projects, identity anchors, decision patterns, creative workflows, finance/Bitcoin thesis, training/health patterns, AI/coding principles). It ignores document metadata such as titles, filenames, creation dates, "purpose" lines, and headings (for example "MASTER IDENTITY DOCUMENT"), and drops tiny fragments.
+- **Claude API mode (optional):** when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set, Claude proposes higher-quality suggestions from the source text. It receives the source excerpts as text only, has no tools, and cannot approve or write memory. If the API is unavailable or returns an unusable response, extraction falls back to the deterministic pass.
+
+Either way, suggestions are saved for review only. Only your explicit approval writes an approved memory. The API key is read from the environment for the single model call and is never stored, logged, rendered, or exported.
 
 When you chat, Approved Mind Mirror may include relevant **source excerpts** alongside **approved memories**. The two are clearly distinguished:
 

@@ -1,13 +1,19 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import { openDatabase, tableExists, TABLES } from "./db.js";
-import { createDraftFromText } from "./hermes.js";
+import { createDraftFromProposal } from "./hermes.js";
+import { detectCategory, detectTags } from "./draftGeneration.js";
+import { resolveChatModeConfig } from "./llm/chatMode.js";
+import { AnthropicChatProvider } from "./llm/anthropicChatProvider.js";
 import type {
+  ChatProvider,
+  DraftProposal,
   HermesRuntimeOptions,
   MemoryDraft,
   Source,
   SourceChunk,
   SourceChunkResult,
+  SourceMemoryCandidate,
   SourceSummary
 } from "./types.js";
 
@@ -16,6 +22,51 @@ const ALLOWED_EXTENSIONS = [".md", ".markdown", ".txt"] as const;
 const TARGET_CHUNK_CHARS = 1000;
 const MAX_CHUNK_CHARS = 1500;
 const MIN_CHUNK_CHARS = 80;
+
+const DEFAULT_SUGGESTION_LIMIT = 7;
+const MIN_SUGGESTION_LIMIT = 1;
+const MAX_SUGGESTION_LIMIT = 10;
+const MIN_STATEMENT_CHARS = 40;
+const MAX_STATEMENT_CHARS = 320;
+const MIN_STATEMENT_WORDS = 6;
+
+// Lines that describe the document itself rather than durable personal context.
+const METADATA_KEYS = new Set([
+  "title",
+  "subtitle",
+  "purpose",
+  "created",
+  "date",
+  "updated",
+  "author",
+  "filename",
+  "file",
+  "source",
+  "version",
+  "status",
+  "tags",
+  "category",
+  "type",
+  "name",
+  "id"
+]);
+
+// Signals that a sentence states something durable worth remembering.
+const DURABLE_SIGNALS: RegExp[] = [
+  /\bprefer(?:s|red|ence)?\b/i,
+  /\bi (?:always|never|like|love|want|need|believe|value|tend|aim|try|focus|care|hold|keep)\b/i,
+  /\bmy (?:goal|approach|workflow|principle|philosophy|thesis|preference|routine|style|process|plan|practice|rule)\b/i,
+  /\b(?:always|never|consistently|routinely|by default)\b/i,
+  /\b(?:decided|decision|committed|chose|settled|standard|rule|principle)\b/i,
+  /\bproject\b/i,
+  /\b(?:philosophy|value|values|belief|thesis|approach|mindset|identity)\b/i,
+  /\b(?:bitcoin|finance|financial|investing|investment|money|wealth)\b/i,
+  /\b(?:training|health|fitness|workout|exercise|diet|nutrition|sleep)\b/i,
+  /\b(?:should|must|need to|have to|ought to)\b/i,
+  /\b(?:workflow|storyboard|prompt|seedance|video|render|footage)\b/i,
+  /\b(?:don't|do not|avoid|refuse)\b/i,
+  /\b(?:ai|coding|engineering|software)\b/i
+];
 
 const SOURCE_STOPWORDS = new Set([
   "about",
@@ -215,25 +266,235 @@ export function retrieveRelevantSourceChunks(
   }
 }
 
-export function suggestMemoriesFromSource(
+export async function suggestMemoriesFromSource(
   sourceId: number,
   options: HermesRuntimeOptions & { limit?: number } = {}
-): MemoryDraft[] {
+): Promise<MemoryDraft[]> {
   const summary = getSource(sourceId, options);
   if (!summary) {
     throw new Error(`Source ${sourceId} was not found.`);
   }
 
   const chunks = getSourceChunks(sourceId, options);
-  const candidates = chunks
-    .map((chunk) => ({ chunk, text: firstDurableStatement(chunk.content) }))
-    .filter((entry): entry is { chunk: SourceChunk; text: string } => Boolean(entry.text))
-    .slice(0, options.limit ?? 3);
+  const limit = clampSuggestionLimit(options.limit);
+  const candidates = await extractSourceMemoryCandidates(summary, chunks, limit, options);
 
   const sourceLabel = `source #${summary.id}: ${summary.title}`;
-  return candidates.map(({ chunk, text }) =>
-    createDraftFromText(text, "source", `${sourceLabel} (excerpt ${chunk.chunk_index + 1})`, options)
+  return candidates.map((candidate) =>
+    createDraftFromProposal(buildProposalFromCandidate(candidate, sourceLabel), options)
   );
+}
+
+function clampSuggestionLimit(limit: number | undefined): number {
+  const requested = Number.isInteger(limit) ? (limit as number) : DEFAULT_SUGGESTION_LIMIT;
+  return Math.min(MAX_SUGGESTION_LIMIT, Math.max(MIN_SUGGESTION_LIMIT, requested));
+}
+
+async function extractSourceMemoryCandidates(
+  summary: SourceSummary,
+  chunks: SourceChunk[],
+  limit: number,
+  options: HermesRuntimeOptions
+): Promise<SourceMemoryCandidate[]> {
+  const provider = resolveSourceExtractionProvider(options);
+  if (provider?.extractSourceMemories) {
+    try {
+      const result = await provider.extractSourceMemories({
+        sourceId: summary.id,
+        sourceTitle: summary.title,
+        chunks: chunks.map((chunk) => ({ chunkIndex: chunk.chunk_index, content: chunk.content })),
+        limit
+      });
+      const sanitized = sanitizeProviderCandidates(result, limit);
+      if (sanitized.length > 0) {
+        return sanitized;
+      }
+    } catch {
+      // Fall back to deterministic extraction when the provider is unavailable or fails.
+    }
+  }
+  return extractDeterministicSourceMemories(chunks, limit);
+}
+
+function resolveSourceExtractionProvider(options: HermesRuntimeOptions): ChatProvider | undefined {
+  if (options.chatProvider) {
+    return options.chatProvider;
+  }
+  const config = resolveChatModeConfig();
+  if (config.id === "anthropic" && config.apiKey) {
+    return new AnthropicChatProvider({ apiKey: config.apiKey, model: config.model });
+  }
+  return undefined;
+}
+
+function sanitizeProviderCandidates(
+  candidates: SourceMemoryCandidate[],
+  limit: number
+): SourceMemoryCandidate[] {
+  const seen = new Set<string>();
+  const sanitized: SourceMemoryCandidate[] = [];
+  for (const candidate of candidates) {
+    const content = (candidate?.content ?? "").replace(/\s+/g, " ").trim();
+    if (!content) {
+      continue;
+    }
+    const key = content.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const tags = Array.isArray(candidate.tags)
+      ? candidate.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+      : [];
+    const chunkIndexes = Array.isArray(candidate.chunkIndexes)
+      ? candidate.chunkIndexes.filter((index): index is number => Number.isInteger(index) && index >= 0)
+      : undefined;
+    sanitized.push({
+      content,
+      category: typeof candidate.category === "string" ? candidate.category.trim() : "",
+      tags,
+      rationale: typeof candidate.rationale === "string" ? candidate.rationale.trim() : undefined,
+      chunkIndexes
+    });
+    if (sanitized.length >= limit) {
+      break;
+    }
+  }
+  return sanitized;
+}
+
+export function extractDeterministicSourceMemories(
+  chunks: SourceChunk[],
+  limit: number
+): SourceMemoryCandidate[] {
+  const seen = new Set<string>();
+  const scored: Array<{ content: string; score: number; chunkIndex: number }> = [];
+
+  for (const chunk of chunks) {
+    for (const statement of extractStatements(chunk.content)) {
+      const key = statement.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      const score = scoreDurableStatement(statement);
+      if (score <= 0) {
+        continue;
+      }
+      seen.add(key);
+      scored.push({ content: statement, score, chunkIndex: chunk.chunk_index });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score || a.chunkIndex - b.chunkIndex);
+  return scored.slice(0, limit).map(({ content, chunkIndex }) => ({
+    content,
+    category: detectCategory(content),
+    tags: detectTags(content),
+    chunkIndexes: [chunkIndex]
+  }));
+}
+
+function extractStatements(content: string): string[] {
+  const statements: string[] = [];
+  for (const rawLine of content.split(/\n/)) {
+    const line = stripListMarkers(rawLine.trim());
+    if (!line || isMetadataLine(line)) {
+      continue;
+    }
+    for (const piece of line.split(/(?<=[.!?])\s+/)) {
+      const statement = toCompleteStatement(piece);
+      if (statement) {
+        statements.push(statement);
+      }
+    }
+  }
+  return statements;
+}
+
+function stripListMarkers(line: string): string {
+  return line.replace(/^(?:[-*+]\s+|\d+[.)]\s+|>\s+)/, "").trim();
+}
+
+function isMetadataLine(line: string): boolean {
+  const stripped = line.replace(/^#{1,6}\s*/, "").replace(/^\*+|\*+$/g, "").replace(/^_+|_+$/g, "").trim();
+  if (!stripped) {
+    return true;
+  }
+  if (/^#{1,6}\s/.test(line) || /^[-*_=]{3,}$/.test(line)) {
+    return true;
+  }
+
+  const letters = stripped.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 4 && stripped === stripped.toUpperCase() && !/[.!?]$/.test(stripped)) {
+    // All-caps heading such as "MASTER IDENTITY DOCUMENT".
+    return true;
+  }
+
+  const keyValue = /^([A-Za-z][\w /-]{0,24}):\s*(.*)$/.exec(stripped);
+  if (keyValue) {
+    const key = (keyValue[1] ?? "").trim().toLowerCase();
+    const value = (keyValue[2] ?? "").trim();
+    if (METADATA_KEYS.has(key)) {
+      return true;
+    }
+    // Short "Label: value" fragments (e.g. "Dynamics: Not tribal.") are not standalone memories.
+    if (wordCount(value) < MIN_STATEMENT_WORDS) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function toCompleteStatement(piece: string): string | undefined {
+  const normalized = piece.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return undefined;
+  }
+  // Must begin like a sentence (capital letter or opening quote), not mid-word fragments.
+  if (!/^[A-Z"'“]/.test(normalized)) {
+    return undefined;
+  }
+  if (wordCount(normalized) < MIN_STATEMENT_WORDS) {
+    return undefined;
+  }
+  if (normalized.length < MIN_STATEMENT_CHARS || normalized.length > MAX_STATEMENT_CHARS) {
+    return undefined;
+  }
+  // Must read as a finished sentence rather than a clipped excerpt.
+  if (!/[.!?]["'”)\]]?$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function scoreDurableStatement(statement: string): number {
+  return DURABLE_SIGNALS.reduce((sum, pattern) => sum + (pattern.test(statement) ? 1 : 0), 0);
+}
+
+function wordCount(value: string): number {
+  const trimmed = value.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
+function buildProposalFromCandidate(
+  candidate: SourceMemoryCandidate,
+  sourceLabel: string
+): DraftProposal {
+  const content = candidate.content.trim();
+  const category = candidate.category?.trim() || detectCategory(content);
+  const tags = candidate.tags.length > 0 ? candidate.tags : detectTags(content);
+  const excerptLabel =
+    candidate.chunkIndexes && candidate.chunkIndexes.length > 0
+      ? ` (excerpt ${candidate.chunkIndexes.map((index) => index + 1).join(", ")})`
+      : "";
+  return {
+    source_type: "source",
+    source_label: `${sourceLabel}${excerptLabel}`,
+    proposed_category: category,
+    proposed_content: content,
+    proposed_tags_json: JSON.stringify(tags.slice(0, 12)),
+    proposed_confidence: "medium"
+  };
 }
 
 export function chunkContent(content: string): string[] {
@@ -292,15 +553,6 @@ function hardSplit(paragraph: string): string[] {
     pieces.push(paragraph.slice(start, start + MAX_CHUNK_CHARS).trim());
   }
   return pieces.filter(Boolean);
-}
-
-function firstDurableStatement(content: string): string | undefined {
-  const compact = content.replace(/\s+/g, " ").trim();
-  if (compact.length < MIN_CHUNK_CHARS) {
-    return undefined;
-  }
-  const sentence = compact.split(/(?<=[.!?])\s+/)[0] ?? compact;
-  return sentence.length > 280 ? `${sentence.slice(0, 277)}...` : sentence;
 }
 
 function getSourceSummary(db: Database.Database, sourceId: number): SourceSummary | undefined {
