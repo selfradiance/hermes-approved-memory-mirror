@@ -55,6 +55,8 @@ chat message -> memory suggestion -> save for review -> approve memory -> approv
 
 Direct requests such as "remember that..." skip the suggestion card and save the statement for review, not as an approved memory. Short payloads become one pending suggestion. Longer multi-paragraph or bulleted remember-this payloads use a chat-local extraction path that creates several concise pending suggestions from the pasted material, with provider-assisted extraction when available and deterministic fallback if the provider fails. Command phrases such as "Can you remember all this?" are instruction text only and are filtered before any draft can be created.
 
+Direct Add memory intake is intentionally memory-shape aware. Short notes still create one pending draft immediately. Long, multi-paragraph, markdown-like, or source-like notes render a choice screen before any write: split into pending memory suggestions, import as a source, or save as one pending memory anyway. This is guidance, not a safety block; explicit approval is still required before any memory is approved.
+
 Source library flow (v0.4.0):
 
 ```text

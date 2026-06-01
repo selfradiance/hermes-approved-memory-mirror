@@ -133,6 +133,8 @@ From this chat
 
 After you save, Approved Mind Mirror says "Saved for review. Approve it when you’re ready." If you say "remember that...", "save this...", or "add this to memory..." with actual information attached, it saves the information for review and tells you to approve it when ready. If you only ask "Can you remember this?" without pasting the information, it asks you to paste the payload instead of saving the request phrase. When you paste a longer multi-paragraph or bulleted block after "Can you remember all this?", Approved Mind Mirror can split the payload into several memory suggestions for review instead of saving one giant note. It still does not create an approved memory. Approval remains explicit through the review flow.
 
+The direct **Add memory** form is meant for short durable notes and preferences. If you paste a long, multi-paragraph, or source-like note there, Approved Mind Mirror now asks how you want to handle it: split it into memory suggestions, import it as a source, or save it as one memory anyway. Any memory-shaped result still waits for explicit approval.
+
 Flow:
 
 ```text

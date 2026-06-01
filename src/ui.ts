@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import {
   createChatSession,
   dismissMemorySuggestion,
+  extractRememberedPayloadSuggestions,
   getLatestMemorySuggestion,
   listChatMessages,
   listChatSessions,
@@ -13,6 +14,7 @@ import {
 } from "./chat.js";
 import {
   approveDraft,
+  createDraftFromText,
   doctor,
   ensureHermesInitialized,
   exportApprovedMemories,
@@ -73,6 +75,7 @@ interface RenderState {
   sourceSearchQuery?: string;
   sourceSearchResults?: SourceChunkResult[];
   suggestedDraftIds?: number[];
+  longMemoryText?: string;
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -94,6 +97,10 @@ interface UiMemorySource {
 
 const POST_CONTENT_TYPE = "application/x-www-form-urlencoded";
 const FORBIDDEN_LOCAL_REQUEST = "Forbidden: invalid local request origin";
+const LONG_DIRECT_MEMORY_CHARS = 1500;
+const LONG_DIRECT_MEMORY_PARAGRAPHS = 3;
+const LONG_DIRECT_MEMORY_BULLETS = 4;
+const LONG_DIRECT_MEMORY_LINES = 24;
 
 export async function handleUiRequest(
   request: Request,
@@ -243,6 +250,73 @@ export async function handleUiRequest(
     }
 
     if (request.method === "POST" && url.pathname === "/drafts") {
+      const form = await readForm(request);
+      const text = requiredFormValue(form, "text", "Note text is required.");
+      if (isLongDirectMemoryInput(text)) {
+        return htmlResponse(renderPage(runtime, { longMemoryText: text }));
+      }
+      intakeText(text, runtime);
+      return htmlResponse(
+        renderPage(runtime, {
+          notice: {
+            kind: "success",
+            message: "Saved for review. Approve it when you’re ready."
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/drafts/long/split") {
+      const form = await readForm(request);
+      const text = requiredFormValue(form, "text", "Note text is required.");
+      const suggestions = await extractRememberedPayloadSuggestions(text, undefined, runtime);
+      if (suggestions.length === 0) {
+        return htmlResponse(
+          renderPage(runtime, {
+            longMemoryText: text,
+            notice: {
+              kind: "info",
+              message:
+                "I didn’t find any strong standalone memories in that note. You can import it as a source or save it as one memory anyway."
+            }
+          })
+        );
+      }
+
+      const drafts = suggestions.map((suggestion) =>
+        createDraftFromText(suggestion, "manual_text", "web add memory split", runtime)
+      );
+      return htmlResponse(
+        renderPage(runtime, {
+          notice: {
+            kind: "success",
+            message: `Saved ${drafts.length} memory suggestion${
+              drafts.length === 1 ? "" : "s"
+            } for review. Approve or edit each one when you’re ready.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/drafts/long/import") {
+      const form = await readForm(request);
+      const text = requiredFormValue(form, "text", "Note text is required.");
+      const title = titleFromPastedMemory(text);
+      const source = importSource({ filename: "pasted-note.md", content: text, title }, runtime);
+      return htmlResponse(
+        renderSourcesPage(runtime, {
+          selectedSourceId: source.id,
+          notice: {
+            kind: "success",
+            message: `Imported "${source.title}" as a source with ${source.chunk_count} excerpt${
+              source.chunk_count === 1 ? "" : "s"
+            }. It is not an approved memory.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/drafts/long/save-one") {
       const form = await readForm(request);
       const text = requiredFormValue(form, "text", "Note text is required.");
       intakeText(text, runtime);
@@ -808,7 +882,10 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 
     ${state.notice ? renderNotice(state.notice) : ""}
 
-    <section class="chat-card" id="chat">
+    ${
+      state.longMemoryText
+        ? renderLongMemoryChoice(state.longMemoryText)
+        : `<section class="chat-card" id="chat">
       <div class="chat-head">
         <form method="post" action="/chat/new">
           <button class="secondary" type="submit"${model.canReadMemory ? "" : " disabled"}>New Chat</button>
@@ -847,7 +924,8 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
           ${renderDrafts(model.pendingDrafts)}
         </div>
       </details>
-    </div>
+    </div>`
+    }
 
     <footer class="app-footer">
       <a href="/system">Diagnostics</a>
@@ -1619,6 +1697,41 @@ function renderNotice(notice: Notice): string {
   )}</div>`;
 }
 
+function renderLongMemoryChoice(text: string): string {
+  return `<section class="chat-card" id="add-memory-choice">
+    <div class="stack">
+      <div>
+        <h2>This looks like a long note or source.</h2>
+        <p class="hint">Long memories can become hard to retrieve later. Choose how to handle it.</p>
+      </div>
+      <details>
+        <summary>Preview pasted note</summary>
+        <pre>${escapeHtml(snippet(text, 1600))}</pre>
+      </details>
+      <div class="actions" aria-label="Long memory choices">
+        <form method="post" action="/drafts/long/split">
+          ${renderHiddenLongMemoryText(text)}
+          <button type="submit">Split into memory suggestions</button>
+        </form>
+        <form method="post" action="/drafts/long/import">
+          ${renderHiddenLongMemoryText(text)}
+          <button class="secondary" type="submit">Import as source</button>
+        </form>
+        <form method="post" action="/drafts/long/save-one">
+          ${renderHiddenLongMemoryText(text)}
+          <button class="secondary" type="submit">Save as one memory anyway</button>
+        </form>
+      </div>
+      <p class="hint">Anything saved as memory still waits for your approval before it becomes part of your approved memories.</p>
+      <a class="link-button" href="/">Back to chat</a>
+    </div>
+  </section>`;
+}
+
+function renderHiddenLongMemoryText(text: string): string {
+  return `<textarea name="text" hidden>${escapeHtml(text)}</textarea>`;
+}
+
 function renderDrafts(drafts: MemoryDraft[]): string {
   if (drafts.length === 0) {
     return `<p class="empty">No memory suggestions waiting.</p>`;
@@ -1866,6 +1979,59 @@ function buildSuggestionNotice(suggestionCount: number, chunkCount: number, requ
     } ${verb} found. Approve or edit each one when you’re ready.`;
   }
   return `${reviewed} Suggested ${suggestionCount} ${noun} for review. Approve or edit each one when you’re ready.`;
+}
+
+function isLongDirectMemoryInput(text: string): boolean {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  const paragraphs = normalized.split(/\n\s*\n+/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const lines = normalized.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const bulletLines = lines.filter((line) => /^(?:[-*+]\s+|\d+[.)]\s+)/.test(line)).length;
+  const headingLines = lines.filter((line) => /^#{1,6}\s+\S/.test(line)).length;
+
+  return (
+    normalized.length > LONG_DIRECT_MEMORY_CHARS ||
+    paragraphs.length >= LONG_DIRECT_MEMORY_PARAGRAPHS ||
+    bulletLines >= LONG_DIRECT_MEMORY_BULLETS ||
+    headingLines > 0 ||
+    lines.length >= LONG_DIRECT_MEMORY_LINES
+  );
+}
+
+function titleFromPastedMemory(text: string): string {
+  const lines = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const heading = lines
+    .map((line) => /^#{1,6}\s+(.+)$/.exec(line)?.[1]?.trim())
+    .find((value): value is string => Boolean(value));
+  if (heading) {
+    return trimTitle(heading);
+  }
+
+  const firstReadableLine = lines.find((line) => line.length >= 4 && line.length <= 100);
+  if (firstReadableLine) {
+    return trimTitle(firstReadableLine.replace(/^[-*+]\s+/, ""));
+  }
+
+  return `Pasted note - ${formatLocalTimestamp(new Date())}`;
+}
+
+function trimTitle(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 100 ? `${normalized.slice(0, 97)}...` : normalized;
+}
+
+function formatLocalTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+function snippet(value: string, maxLength: number): string {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength).trimEnd()}...`;
 }
 
 function parsePositiveInteger(value: string, label: string): number {

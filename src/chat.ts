@@ -733,7 +733,7 @@ async function createRememberedPayloadDrafts(
   return suggestions.map((suggestion) => createDraftFromText(suggestion, "chat", sourceLabel, options));
 }
 
-async function extractRememberedPayloadSuggestions(
+export async function extractRememberedPayloadSuggestions(
   payload: string,
   provider: ChatProvider | undefined,
   options: HermesRuntimeOptions

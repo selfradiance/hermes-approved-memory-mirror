@@ -12,6 +12,7 @@ import {
   reflectOnApprovedMemory
 } from "../src/hermes.js";
 import { DEFAULT_UI_HOST, handleUiRequest, startUiServer } from "../src/ui.js";
+import { listSources } from "../src/sources.js";
 import type { HermesRuntimeOptions } from "../src/types.js";
 
 const tempRoots: string[] = [];
@@ -41,6 +42,20 @@ function formRequest(
 
 function getRequest(pathname: string): Request {
   return new Request(`http://127.0.0.1${pathname}`);
+}
+
+function longAddMemoryText(): string {
+  return [
+    "# Source review workflow",
+    "",
+    "I prefer inline source suggestions because jumping between pages is annoying.",
+    "",
+    "Project Source Review should keep new memory suggestions visible under the source result.",
+    "",
+    "Use the source extraction workflow for imported files and direct memory splitting for pasted long notes.",
+    "",
+    "The memory review flow should avoid one giant memory when a note contains several durable points."
+  ].join("\n");
 }
 
 afterEach(() => {
@@ -230,6 +245,78 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain("Saved for review.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(1);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("long Add memory input shows a choice before creating a pending memory", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(formRequest("/drafts", { text: longAddMemoryText() }), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("This looks like a long note or source.");
+    expect(html).toContain("Long memories can become hard to retrieve later. Choose how to handle it.");
+    expect(html).toContain("Split into memory suggestions");
+    expect(html).toContain("Import as source");
+    expect(html).toContain("Save as one memory anyway");
+    expect(html).not.toContain("memory_entries");
+    expect(html).not.toContain("memory_drafts");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("long Add memory can still be saved as one pending memory by choice", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const text = longAddMemoryText();
+
+    const response = await handleUiRequest(formRequest("/drafts/long/save-one", { text }), runtime(root));
+    const html = await response.text();
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Saved for review.");
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.proposed_content).toContain("Source review workflow");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("long Add memory can be imported as a source without creating memory", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(formRequest("/drafts/long/import", { text: longAddMemoryText() }), runtime(root));
+    const html = await response.text();
+    const sources = listSources(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Imported &quot;Source review workflow&quot; as a source");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.title).toBe("Source review workflow");
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+  });
+
+  it("long Add memory can split into multiple pending suggestions only", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const text = longAddMemoryText();
+
+    const response = await handleUiRequest(formRequest("/drafts/long/split", { text }), runtime(root));
+    const html = await response.text();
+    const drafts = listPendingDrafts(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("memory suggestions for review");
+    expect(drafts.length).toBeGreaterThan(1);
+    expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("inline source suggestions");
+    expect(drafts.every((draft) => draft.proposed_content.length < text.length)).toBe(true);
+    expect(drafts.every((draft) => draft.status === "pending")).toBe(true);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+
+    approveDraft(drafts[0]!.id, runtime(root));
+    expect(listApprovedMemories(runtime(root))).toHaveLength(1);
   });
 
   it("approving through the UI creates approved memory through existing logic", async () => {
