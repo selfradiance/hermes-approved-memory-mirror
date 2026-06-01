@@ -24,6 +24,7 @@ import {
   rejectDraft,
   searchApprovedMemories
 } from "./hermes.js";
+import { chatModeLabel } from "./llm/chatMode.js";
 import { formatDoctor } from "./format.js";
 import type {
   ChatMessage,
@@ -102,17 +103,22 @@ export async function handleUiRequest(
       const form = await readForm(request);
       const message = requiredFormValue(form, "message", "Chat message is required.");
       const sessionId = parseOptionalPositiveInteger(form.get("sessionId") ?? "");
-      const chatTurn = sendChatMessage(message, { ...runtime, sessionId });
+      const chatTurn = await sendChatMessage(message, { ...runtime, sessionId });
       return htmlResponse(
         renderPage(runtime, {
           activeSessionId: chatTurn.session.id,
           chatTurn,
-          notice: chatTurn.savedDraft
+          notice: chatTurn.providerError
             ? {
-                kind: "success",
-                message: "Saved for review. Approve it when you’re ready."
+                kind: "info",
+                message: `Claude API was unavailable, so HERmes replied in local deterministic mode. (${chatTurn.providerError})`
               }
-            : undefined
+            : chatTurn.savedDraft
+              ? {
+                  kind: "success",
+                  message: "Saved for review. Approve it when you’re ready."
+                }
+              : undefined
         })
       );
     }
@@ -347,6 +353,25 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       margin: 5px 0 0;
       color: var(--muted);
       font-size: 0.96rem;
+    }
+    .mode-label {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      letter-spacing: 0.02em;
+    }
+    .app-footer {
+      margin-top: 26px;
+      text-align: center;
+    }
+    .app-footer a {
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-decoration: none;
+    }
+    .app-footer a:hover {
+      color: var(--accent-strong);
+      text-decoration: underline;
     }
     .top-actions,
     .actions,
@@ -674,9 +699,10 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       <nav class="top-actions" aria-label="App actions">
         <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
         <a href="#add-memory">Add memory</a>
-        <a href="/system">System</a>
       </nav>
     </header>
+
+    <p class="mode-label" aria-label="Conversation mode">Mode: ${escapeHtml(model.modeLabel)}</p>
 
     ${state.notice ? renderNotice(state.notice) : ""}
 
@@ -727,6 +753,10 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
         </div>
       </details>
     </div>
+
+    <footer class="app-footer">
+      <a href="/system">Diagnostics</a>
+    </footer>
   </main>
 </body>
 </html>`;
@@ -1025,10 +1055,12 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     state.chatTurn?.memorySuggestion ??
     (canReadMemory && activeSessionId ? getLatestMemorySuggestion(activeSessionId, runtime) : undefined);
   const searchQuery = state.searchQuery ?? "";
+  const modeLabel = state.chatTurn?.providerLabel ?? chatModeLabel();
 
   return {
     report,
     canReadMemory,
+    modeLabel,
     pendingDrafts,
     approvedMemories,
     chatSessions,

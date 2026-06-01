@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 import { createDraftProposalFromText } from "./draftGeneration.js";
 import { initializeSchema, openDatabase, resolveHermesPaths, tableExists, TABLES } from "./db.js";
 import { readExplicitIntakeFile } from "./fileSafety.js";
+import { chatModeLabel } from "./llm/chatMode.js";
 import type {
   DoctorReport,
   DraftProposal,
@@ -328,7 +329,8 @@ export function doctor(options: HermesRuntimeOptions = {}): DoctorReport {
       pendingDraftCount: 0,
       approvedMemoryCount: 0,
       externalConnectorsConfigured: false,
-      toolsConfigured: false
+      toolsConfigured: false,
+      chatProviderLabel: chatModeLabel()
     };
   }
 
@@ -352,7 +354,8 @@ export function doctor(options: HermesRuntimeOptions = {}): DoctorReport {
       pendingDraftCount,
       approvedMemoryCount,
       externalConnectorsConfigured: false,
-      toolsConfigured: false
+      toolsConfigured: false,
+      chatProviderLabel: chatModeLabel()
     };
   } finally {
     db.close();

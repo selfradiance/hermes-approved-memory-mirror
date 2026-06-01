@@ -3,9 +3,17 @@ import { createHash } from "node:crypto";
 import { openDatabase, tableExists, TABLES } from "./db.js";
 import { createDraftProposalFromText } from "./draftGeneration.js";
 import { createDraftFromText, retrieveRelevantApprovedMemories } from "./hermes.js";
+import { AnthropicChatProvider } from "./llm/anthropicChatProvider.js";
+import { DETERMINISTIC_LABEL, resolveChatModeConfig } from "./llm/chatMode.js";
 import type {
+  ChatGenerationInput,
+  ChatGenerationResult,
   ChatMessage,
+  ChatProvider,
+  ChatProviderContextMessage,
+  ChatProviderId,
   ChatResponse,
+  ChatRole,
   ChatSession,
   ChatTurn,
   HermesRuntimeOptions,
@@ -110,22 +118,89 @@ export function createChatSession(options: HermesRuntimeOptions = {}, title?: st
   }
 }
 
-export function sendChatMessage(
+/**
+ * Local, offline provider. Its text output is byte-identical to the previous
+ * deterministic behavior so existing reflection/idea tests stay valid. It reads
+ * memories and chat context but performs no network calls and proposes nothing
+ * on its own (memory suggestions still come from the rule-based heuristics).
+ */
+export class DeterministicChatProvider implements ChatProvider {
+  readonly id = "deterministic" as const;
+  readonly label = DETERMINISTIC_LABEL;
+
+  async generate(input: ChatGenerationInput): Promise<ChatGenerationResult> {
+    const response = createChatResponse(input.userMessage, input.memories);
+    return {
+      responseText: response.body,
+      mode: response.mode,
+      ideaCandidates: response.ideaCandidates
+    };
+  }
+}
+
+export function resolveChatProvider(options: HermesRuntimeOptions = {}): ChatProvider {
+  if (options.chatProvider) {
+    return options.chatProvider;
+  }
+
+  const config = resolveChatModeConfig();
+  if (config.id === "anthropic" && config.apiKey) {
+    return new AnthropicChatProvider({ apiKey: config.apiKey, model: config.model });
+  }
+
+  return new DeterministicChatProvider();
+}
+
+export async function sendChatMessage(
   userInput: string,
   options: HermesRuntimeOptions & { sessionId?: number } = {}
-): ChatTurn {
+): Promise<ChatTurn> {
   const normalized = userInput.trim();
   if (!normalized) {
     throw new Error("Chat message is required.");
   }
 
   const memoriesUsed = retrieveRelevantApprovedMemories(normalized, { ...options, limit: 5 });
-  const response = createChatResponse(normalized, memoriesUsed);
+  const recentMessages = options.sessionId ? gatherRecentContext(options.sessionId, options) : [];
+  const generationInput: ChatGenerationInput = {
+    userMessage: normalized,
+    recentMessages,
+    memories: memoriesUsed
+  };
+
+  const provider = resolveChatProvider(options);
+  const fallbackProvider =
+    provider.id === "deterministic" ? provider : new DeterministicChatProvider();
+
+  let providerId: ChatProviderId = provider.id;
+  let providerLabel = provider.label;
+  let providerError: string | undefined;
+  let generation: ChatGenerationResult;
+  try {
+    generation = await provider.generate(generationInput);
+  } catch (error) {
+    providerError = sanitizeProviderError(error);
+    providerId = fallbackProvider.id;
+    providerLabel = fallbackProvider.label;
+    generation = await fallbackProvider.generate(generationInput);
+  }
+
+  const response: ChatResponse = {
+    mode: generation.mode,
+    body: generation.responseText,
+    memoriesUsed,
+    ideaCandidates: generation.ideaCandidates
+  };
   const renderedResponse = formatChatResponse(response);
   const memoryIds = memoriesUsed.map(({ memory }) => memory.id);
 
   const db = openExistingChatDb(options);
-  let persistedTurn!: ChatTurn;
+  let persistedTurn!: {
+    session: ChatSession;
+    userMessage: ChatMessage;
+    hermesMessage: ChatMessage;
+    response: ChatResponse;
+  };
   try {
     const insert = db.transaction(() => {
       const session = options.sessionId
@@ -160,6 +235,8 @@ export function sendChatMessage(
     db.close();
   }
 
+  const base: ChatTurn = { ...persistedTurn, providerId, providerLabel, providerError };
+
   const directMemoryText = extractDirectMemoryRequest(normalized);
   if (directMemoryText) {
     const savedDraft = createDraftFromText(
@@ -168,15 +245,21 @@ export function sendChatMessage(
       memorySuggestionSourceLabel(persistedTurn.session.id, persistedTurn.userMessage.id),
       options
     );
-    return { ...persistedTurn, savedDraft };
+    return { ...base, savedDraft };
   }
 
-  const memorySuggestion = suggestMemoryFromUserMessage(normalized, {
-    sessionId: persistedTurn.session.id,
-    messageId: persistedTurn.userMessage.id
-  });
+  const proposedFromProvider = generation.proposedMemoryText?.trim();
+  const memorySuggestion = proposedFromProvider
+    ? createMemorySuggestion(proposedFromProvider, {
+        sessionId: persistedTurn.session.id,
+        messageId: persistedTurn.userMessage.id
+      })
+    : suggestMemoryFromUserMessage(normalized, {
+        sessionId: persistedTurn.session.id,
+        messageId: persistedTurn.userMessage.id
+      });
 
-  return memorySuggestion ? { ...persistedTurn, memorySuggestion } : persistedTurn;
+  return memorySuggestion ? { ...base, memorySuggestion } : base;
 }
 
 export function createChatResponse(userInput: string, memoriesUsed: SearchResult[]): ChatResponse {
@@ -556,6 +639,34 @@ function assertUserChatMessageExists(
   } finally {
     db.close();
   }
+}
+
+function gatherRecentContext(
+  sessionId: number,
+  options: HermesRuntimeOptions
+): ChatProviderContextMessage[] {
+  const db = openExistingChatDb(options);
+  try {
+    const rows = db
+      .prepare(
+        "SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 10"
+      )
+      .all(sessionId) as Array<{ role: ChatRole; content: string }>;
+    return rows.reverse().map((row) => ({ role: row.role, content: row.content }));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Convert any provider failure into a short, human-facing notice. Defensive
+ * redaction guarantees an API key can never leak into UI, logs, or exports even
+ * if an upstream error message somehow embedded one.
+ */
+function sanitizeProviderError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const cleaned = raw.replace(/sk-[A-Za-z0-9-_]+/g, "[redacted]").trim();
+  return cleaned || "Unknown chat provider error.";
 }
 
 function normalizeUserMemoryText(text: string): string {

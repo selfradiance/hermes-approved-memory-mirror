@@ -67,7 +67,7 @@ describe("HERmes v0.2 chat", () => {
     expect(results[0]?.snippet).toContain("Seedance storyboard");
   });
 
-  it("idea mode returns multiple ideas with memory references", () => {
+  it("idea mode returns multiple ideas with memory references", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     const memoryId = approveText(
@@ -75,7 +75,7 @@ describe("HERmes v0.2 chat", () => {
       "Zion Skank creative workflow uses Seedance shot-by-shot prompts and a small approval note."
     );
 
-    const turn = sendChatMessage("Give me creative sparks for Zion Skank content ideas.", runtime(root));
+    const turn = await sendChatMessage("Give me creative sparks for Zion Skank content ideas.", runtime(root));
 
     expect(turn.response.mode).toBe("idea");
     expect(turn.response.ideaCandidates.length).toBeGreaterThanOrEqual(3);
@@ -85,11 +85,11 @@ describe("HERmes v0.2 chat", () => {
     expect(turn.hermesMessage.content).toContain(`Inspired by memories: ${memoryId}`);
   });
 
-  it("/save-draft behavior creates a pending draft only", () => {
+  it("/save-draft behavior creates a pending draft only", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     approveText(root, "Seedance storyboard work benefits from concise approval notes.");
-    const turn = sendChatMessage("What does this make you think of for Seedance?", runtime(root));
+    const turn = await sendChatMessage("What does this make you think of for Seedance?", runtime(root));
 
     const draft = saveLatestChatExchangeDraft(turn.session.id, runtime(root));
 
@@ -100,24 +100,24 @@ describe("HERmes v0.2 chat", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(1);
   });
 
-  it("chat never creates approved memory directly", () => {
+  it("chat never creates approved memory directly", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     approveText(root, "Approved memory about quiet project planning.");
 
-    const turn = sendChatMessage("Reflect on quiet project planning.", runtime(root));
+    const turn = await sendChatMessage("Reflect on quiet project planning.", runtime(root));
     saveLatestChatExchangeDraft(turn.session.id, runtime(root));
 
     expect(listApprovedMemories(runtime(root))).toHaveLength(1);
     expect(listPendingDrafts(runtime(root))).toHaveLength(1);
   });
 
-  it("persists chat sessions and messages locally", () => {
+  it("persists chat sessions and messages locally", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     const memoryId = approveText(root, "Seedance storyboard notes should stay inspectable.");
 
-    const turn = sendChatMessage("Mirror the Seedance storyboard note.", runtime(root));
+    const turn = await sendChatMessage("Mirror the Seedance storyboard note.", runtime(root));
     const sessions = listChatSessions(runtime(root));
     const messages = listChatMessages(turn.session.id, runtime(root));
 
@@ -144,11 +144,11 @@ describe("HERmes v0.2 chat", () => {
     expect(suggestMemoryFromUserMessage("/save-draft")).toBeUndefined();
   });
 
-  it("direct remember requests create pending drafts only", () => {
+  it("direct remember requests create pending drafts only", async () => {
     const root = makeProject();
     initHermes(runtime(root));
 
-    const turn = sendChatMessage(
+    const turn = await sendChatMessage(
       "remember that I prefer deterministic memory mirrors over automation agents.",
       runtime(root)
     );
@@ -161,10 +161,10 @@ describe("HERmes v0.2 chat", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 
-  it("saved organic suggestions remain pending until explicit approval", () => {
+  it("saved organic suggestions remain pending until explicit approval", async () => {
     const root = makeProject();
     initHermes(runtime(root));
-    const turn = sendChatMessage(
+    const turn = await sendChatMessage(
       "My goal is to make HERmes feel like a natural conversation partner before adding intelligence.",
       runtime(root)
     );
@@ -187,10 +187,10 @@ describe("HERmes v0.2 chat", () => {
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
 
-  it("dismissed suggestions do not reappear for the same message", () => {
+  it("dismissed suggestions do not reappear for the same message", async () => {
     const root = makeProject();
     initHermes(runtime(root));
-    const turn = sendChatMessage(
+    const turn = await sendChatMessage(
       "Going forward, HERmes should suggest memory lightly without interrupting chat.",
       runtime(root)
     );
@@ -207,11 +207,11 @@ describe("HERmes v0.2 chat", () => {
     expect(getLatestMemorySuggestion(turn.session.id, runtime(root))).toBeUndefined();
   });
 
-  it("chat still works with zero approved memories", () => {
+  it("chat still works with zero approved memories", async () => {
     const root = makeProject();
     initHermes(runtime(root));
 
-    const turn = sendChatMessage("What does this make you think of for a tiny local app?", runtime(root));
+    const turn = await sendChatMessage("What does this make you think of for a tiny local app?", runtime(root));
 
     expect(turn.response.mode).toBe("idea");
     expect(turn.response.memoriesUsed).toHaveLength(0);

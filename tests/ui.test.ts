@@ -98,6 +98,18 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain('href="/system"');
   });
 
+  it("shows the conversation mode label and hides the prominent System button", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Mode: Local deterministic");
+    expect(html).not.toContain(">System</a>");
+    expect(html).toContain(">Diagnostics</a>");
+  });
+
   it("shows technical diagnostics only on the system page", async () => {
     const root = makeProject();
 

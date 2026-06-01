@@ -1,17 +1,30 @@
 # Architecture
 
-HERmes v0.2.4 is a local approved-memory mirror with a localhost-only web chat UI, a small SQLite-backed service layer, organic memory suggestions, and an advanced CLI. The browser UI is local-only; it is not an external web app and does not add automation capabilities.
+HERmes v0.3.0 is a local approved-memory mirror with a localhost-only web chat UI, a small SQLite-backed service layer, organic memory suggestions, a chat provider layer with an optional Claude API mode, and an advanced CLI. The browser UI is local-only; it is not an external web app and does not add automation capabilities.
 
 ## Components
 
 - `src/cli.ts` defines the Commander CLI.
-- `src/chat.ts` contains deterministic chat response, idea mode, organic memory suggestion, and chat persistence logic.
+- `src/chat.ts` contains deterministic chat response, idea mode, organic memory suggestion, chat persistence logic, the `DeterministicChatProvider`, and `resolveChatProvider`.
 - `src/ui.ts` contains the loopback-only HTTP server and server-rendered local web chat/review UI.
 - `src/hermes.ts` contains the memory workflow operations.
 - `src/db.ts` owns database path resolution, schema creation, and SQLite access.
 - `src/draftGeneration.ts` contains deterministic draft proposal logic.
 - `src/format.ts` formats CLI output.
-- `src/llm/*` defines future provider interfaces and the no-op provider.
+- `src/llm/chatMode.ts` resolves the chat mode from environment variables (the only place the API key is read).
+- `src/llm/anthropicChatProvider.ts` is the optional Anthropic Claude API chat provider.
+- `src/llm/types.ts` and `src/llm/noopProvider.ts` hold the separate memory-proposal/reflection provider scaffolding.
+
+## Layered design
+
+1. **Local memory store** — SQLite under `.hermes/`, owned by `src/db.ts`. Approved memory lives in `memory_entries`.
+2. **Retrieval layer** — `retrieveRelevantApprovedMemories` in `src/hermes.ts` selects approved memories relevant to a chat message.
+3. **Provider layer** — the `ChatProvider` interface. It receives the user message, recent chat context, and retrieved approved memories, and returns response text plus an optional proposed memory suggestion. Providers are given no tools.
+4. **Deterministic fallback** — `DeterministicChatProvider` is the default and is used whenever API mode is not configured or an API call fails. Its text is identical to the prior offline behavior.
+5. **Optional API provider** — `AnthropicChatProvider` is used only when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are present.
+6. **Approval boundary** — only explicit human approval (`approveDraft`) writes `memory_entries`. No provider can cross this boundary.
+
+The model may read retrieved approved memories and chat context and may generate response/suggestion text (in API mode). State-changing agency is forbidden: no provider can approve memory, execute tools, browse, access accounts, schedule work, or write approved memory directly.
 
 ## Data Flow
 
@@ -36,15 +49,17 @@ Direct requests such as "remember that..." skip the suggestion card and save the
 
 As of v0.2.4 the browser UI uses human memory language and hides developer/internal terms. The UI says "memory suggestion", "This seems worth remembering.", "Save for review", "Saved for review", "Review memory suggestions", "Approve memory", and "Dismiss". The default chat page no longer exposes "draft", database paths, or table names.
 
-Underlying storage is unchanged. A memory suggestion saved for review is still persisted as a `pending` row in `memory_drafts`, and approval still writes `memory_entries`. "Save for review" maps to draft creation, "Approve memory" maps to draft approval, and "Dismiss" maps to draft rejection. Internal route paths (`/drafts`, `/drafts/approve`, `/drafts/reject`) and form fields keep their names; only the visible language changed. No LLM/API/provider integration exists yet.
+Underlying storage is unchanged. A memory suggestion saved for review is still persisted as a `pending` row in `memory_drafts`, and approval still writes `memory_entries`. "Save for review" maps to draft creation, "Approve memory" maps to draft approval, and "Dismiss" maps to draft rejection. Internal route paths (`/drafts`, `/drafts/approve`, `/drafts/reject`) and form fields keep their names; only the visible language changed.
+
+As of v0.3.0 the chat provider layer adds an optional Claude API mode. A subtle "Mode:" label on the chat page reflects the active provider, and the prominent "System" header button is replaced by a small footer "Diagnostics" link to `/system`. When the API is enabled, generated text and proposed suggestions still flow through the same human approval boundary.
 
 ## Local UI Server
 
 `src/ui.ts` starts a Node HTTP server bound to loopback by default at `127.0.0.1:8787`. It refuses non-loopback hosts and rejects non-local/cross-site state-changing requests. The UI ensures the local SQLite schema exists on first request, so normal use does not require an initialization button.
 
-The default page is intentionally chat-first: app name, chat history, message input, HERmes responses, subtle memory sources, organic memory suggestions, save-for-review, add-memory, and review of memory suggestions. Technical diagnostics, database path, table status, approved-memory search, deterministic reflection, and local JSON export live behind `/system`.
+The default page is intentionally chat-first: app name, a subtle conversation-mode label, chat history, message input, HERmes responses, subtle memory sources, organic memory suggestions, save-for-review, add-memory, and review of memory suggestions. Technical diagnostics, database path, table status, approved-memory search, deterministic reflection, and local JSON export live behind `/system`, reached only via a small footer "Diagnostics" link.
 
-The server calls the existing service functions directly and does not introduce LLM/API calls, external connectors, MCP, browser automation, shell execution, scheduler, daemon, subagents, account access, or autonomous actions.
+The server calls the existing service functions directly. It introduces no external connectors, MCP, browser automation, shell execution, scheduler, daemon, subagents, account access, or autonomous actions. The only optional outbound network call is the configured Claude API model endpoint, used purely for chat text generation when API mode is enabled; the model still receives no tools and cannot approve memory.
 
 ## Storage
 
@@ -58,4 +73,4 @@ Dismissed organic suggestions are stored in `memory_suggestion_dismissals`, keye
 
 The approved-memory invariant is unchanged: only explicit draft approval writes `memory_entries`. Intake, chat save, direct remember requests, organic suggestion save, and generated reflection create drafts or temporary output only.
 
-Memory candidate detection is deterministic in v0.2.4. It looks for durable user statements such as preferences, goals, project/workflow statements, settled decisions, and "remember that..." requests. It avoids greetings, tiny vague messages, temporary statements, commands, and system/debug-like text. It does not inspect HERmes responses unless the user explicitly saves the full exchange.
+Memory candidate detection in local deterministic mode is rule-based. It looks for durable user statements such as preferences, goals, project/workflow statements, settled decisions, and "remember that..." requests. It avoids greetings, tiny vague messages, temporary statements, commands, and system/debug-like text. It does not inspect HERmes responses unless the user explicitly saves the full exchange. In optional Claude API mode the model may additionally return a `MEMORY_SUGGESTION:` line that becomes a save-for-review suggestion; it is still subject to the same human approval boundary.

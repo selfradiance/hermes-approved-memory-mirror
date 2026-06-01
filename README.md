@@ -4,20 +4,42 @@ HERmes is a private local memory mirror and idea partner. You chat with it in a 
 
 HERmes stores only memories you approve. Chat can suggest memories and save them for review, but a memory suggestion saved for review is not an approved memory until you approve it. The CLI remains available for advanced use.
 
+## Conversation Modes
+
+HERmes has two chat modes, selected by environment variables only:
+
+- **Local deterministic (default).** Fully offline. No network calls. Chat responses come from a local rule-based engine. This is the mode unless you explicitly opt in to the API.
+- **Claude API (optional).** When you set the environment variables below, HERmes sends your chat message, recent chat context, and the retrieved approved memories to the Anthropic Claude API to generate the response wording.
+
+```bash
+export HERMES_CHAT_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-...      # read from env only; never stored, logged, or exported
+export HERMES_MODEL=claude-sonnet-4-6 # optional; defaults to claude-sonnet-4-6
+```
+
+Be honest about what API mode means:
+
+- It is **not** fully local. Your chat message, recent chat turns, and the selected approved-memory snippets are sent to Anthropic to produce the reply.
+- It still has **no tools**. The model cannot browse, run code, call connectors, or take any action.
+- It still **cannot approve memory**. Anything the model proposes becomes a "save for review" suggestion only; human approval through the review flow is the only way a memory is approved.
+- If the API key is missing or the call fails, HERmes silently falls back to local deterministic mode and tells you it did so.
+- The API key is read from the environment for the single model call. It is never written to SQLite, logged, surfaced in the UI, included in errors, or written to exports.
+
 ## What It Is Not
 
-HERmes is not an autonomous agent. It does not act on the outside world, execute tools, run shell commands from the app, crawl files, connect to services, schedule background work, collect telemetry, or call an LLM.
+HERmes is not an autonomous agent. It does not act on the outside world, execute tools, run shell commands from the app, crawl files, connect to services, schedule background work, or collect telemetry. In optional Claude API mode it may generate chat text and memory-suggestion wording, but it still takes no actions and cannot approve memory.
 
 ## Safety Boundaries
 
 - Local CLI plus localhost-only web UI; no public web app or cloud service.
 - SQLite only; runtime data stays under `.hermes/`.
-- No external connectors, MCP, browser automation, background daemon, scheduler, subagents, telemetry, analytics, or external network calls.
+- No external connectors, MCP, browser automation, background daemon, scheduler, subagents, telemetry, or analytics.
+- The only optional outbound network call is to the configured Claude API model endpoint for chat text generation, and only when you opt in via environment variables.
 - No email, calendar, contacts, messaging, social, banking, exchange, wallet, GitHub, or YouTube access.
 - No shell execution or generated-code execution from the app.
 - File intake reads one explicitly supplied file only.
 - Approved memories are never hard-deleted.
-- LLM output, if added later, must create drafts only. Human approval remains mandatory.
+- LLM output creates "save for review" suggestions only. Human approval remains mandatory; the model never writes approved memory.
 
 ## Install
 
@@ -65,7 +87,7 @@ npm install
 npm run ui
 ```
 
-The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It does not add LLM/API calls, connectors, accounts, telemetry, cloud sync, or autonomous actions.
+The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It adds no connectors, accounts, telemetry, cloud sync, or autonomous actions. A subtle "Mode:" label shows whether chat is running in local deterministic or Claude API mode. The only optional outbound call is the configured Claude API model endpoint, and only when you opt in.
 
 In the UI:
 
@@ -76,7 +98,7 @@ In the UI:
 5. Save the latest exchange for review.
 6. Review memory suggestions, then approve a memory or dismiss it.
 7. Add a note and save it for review.
-8. Open `System` only when you want diagnostics, search, deterministic reflection, or local JSON export.
+8. Open `Diagnostics` (small footer link to `/system`) only when you want diagnostics, search, deterministic reflection, or local JSON export.
 
 Only approved memories are used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve a memory.
 
@@ -84,11 +106,10 @@ HERmes sets itself up automatically on first use. Normal chat does not require l
 
 What the UI cannot do:
 
-- No LLM/API/provider calls.
-- No external network calls.
 - No tools, shell execution, browser automation, MCP, connectors, schedulers, daemons, subagents, or account access.
 - No autonomous actions.
-- No automatic approved-memory writes.
+- No automatic approved-memory writes; the optional Claude API provider can propose memory text but only as a "save for review" suggestion.
+- No outbound network calls other than the configured Claude API model endpoint, and only when you opt in via environment variables.
 - No filesystem crawl; file intake still reads one explicitly supplied file only.
 - No writes outside `.hermes/`, except existing explicit export under `.hermes/export/`.
 
@@ -114,7 +135,7 @@ Flow:
 chat message -> memory suggestion -> save for review -> approve memory -> approved memory
 ```
 
-The detector is local and rule-based. It does not call an LLM/API, does not browse, and does not take external actions.
+In local deterministic mode the detector is local and rule-based. In optional Claude API mode the model may also propose a suggestion. In both modes a suggestion is only saved for review on your action, never browsed for, and never turned into an approved memory without explicit approval.
 
 ## Advanced CLI Commands
 
@@ -156,7 +177,7 @@ Example:
 
 ```text
 $ hermes chat
-HERmes chat is local and deterministic. Type /help for commands or /exit to leave.
+HERmes chat mode: Local deterministic. Memory approval is always human-only. Type /help for commands or /exit to leave.
 you> What does this make you think of for Zion Skank?
 HERmes:
 Here are 3 deterministic idea candidates grounded in approved memory.
@@ -172,14 +193,14 @@ you> /save-draft
 Created pending draft 2. Review and approve it separately if it should become memory.
 ```
 
-What chat does not do:
+What chat does not do (in either mode):
 
-- No LLM/API/provider calls.
 - No tools, shell execution, browser automation, MCP, connectors, schedulers, daemons, subagents, or account access.
 - No autonomous actions.
 - No automatic approved-memory writes.
 - No filesystem crawl; chat uses approved memory already in SQLite.
 - No writes outside `.hermes/`; chat sessions and messages are stored in local SQLite tables.
+- No outbound network calls in local deterministic mode; in optional Claude API mode the only outbound call is the configured model endpoint for text generation.
 
 ## Demo
 
@@ -211,8 +232,11 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 4. `reject <draft-id>` marks a draft rejected and writes an audit event.
 5. Web chat, terminal chat, `search`, `list`, `reflect`, and `export` use approved memory only.
 
-## Future LLM Provider Interface
+## Chat Provider Interface
 
-HERmes intentionally does not require Claude, Anthropic, OpenAI, Ollama, or any other LLM API. The code includes small provider interfaces in `src/llm/types.ts` and a deterministic no-op implementation in `src/llm/noopProvider.ts`.
+HERmes does not require any LLM API to run. Chat goes through a small provider interface (`ChatProvider` in `src/types.ts`):
 
-Claude/Anthropic could be added later for memory proposal wording or reflection wording, but LLM output must never write memory directly. It may create drafts only, and human approval must remain mandatory.
+- `DeterministicChatProvider` (in `src/chat.ts`) is the default. It is fully local and offline.
+- `AnthropicChatProvider` (in `src/llm/anthropicChatProvider.ts`) is optional and selected only when `HERMES_CHAT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set.
+
+The provider receives only the user message, recent chat context, and retrieved approved memories. It returns response text and an optional proposed memory suggestion. The provider is given no tools. LLM output never writes memory directly: a proposed suggestion can only be saved for review, and human approval through the review flow remains mandatory.

@@ -30,6 +30,7 @@ import {
   formatReflection,
   formatSearchResults
 } from "./format.js";
+import { chatModeLabel } from "./llm/chatMode.js";
 import type { HermesRuntimeOptions } from "./types.js";
 import type { ChatTurn } from "./types.js";
 
@@ -47,7 +48,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.2.3");
+    .version("0.3.0");
 
   program
     .command("init")
@@ -163,7 +164,9 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
   let session = createChatSession(runtime, "Interactive chat");
   let latestTurn: ChatTurn | undefined;
 
-  out("HERmes chat is local and deterministic. Type /help for commands or /exit to leave.");
+  out(
+    `HERmes chat mode: ${chatModeLabel()}. Memory approval is always human-only. Type /help for commands or /exit to leave.`
+  );
   rl.prompt();
 
   try {
@@ -211,9 +214,12 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
         continue;
       }
 
-      latestTurn = sendChatMessage(line, { ...runtime, sessionId: session.id });
+      latestTurn = await sendChatMessage(line, { ...runtime, sessionId: session.id });
       session = latestTurn.session;
       out(`HERmes:\n${latestTurn.hermesMessage.content}`);
+      if (latestTurn.providerError) {
+        out(`(Claude API was unavailable, so this reply used local deterministic mode: ${latestTurn.providerError})`);
+      }
       if (latestTurn.savedDraft) {
         out("Saved as a draft. Review and approve it before it becomes memory.");
       } else if (latestTurn.memorySuggestion) {

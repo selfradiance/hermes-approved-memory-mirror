@@ -82,7 +82,8 @@ export function formatDoctor(report: DoctorReport): string {
     `External connectors/tools configured: ${
       report.externalConnectorsConfigured || report.toolsConfigured ? "yes" : "no"
     }`,
-    "HERmes posture: local CLI/local interface only; no connectors, no tools, no MCP, no background daemon, no LLM calls."
+    `Chat provider: ${report.chatProviderLabel}`,
+    "HERmes posture: local CLI/local interface only; no connectors, no tools, no MCP, no background daemon. Chat text may use the optional Claude API provider, but it gets no tools and cannot approve memory or take actions."
   ].join("\n");
 }
 

@@ -6,6 +6,33 @@ export type ChatRole = "user" | "hermes";
 export interface HermesRuntimeOptions {
   projectRoot?: string;
   dbFileName?: string;
+  chatProvider?: ChatProvider;
+}
+
+export type ChatProviderId = "deterministic" | "anthropic";
+
+export interface ChatProviderContextMessage {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatGenerationInput {
+  userMessage: string;
+  recentMessages: ChatProviderContextMessage[];
+  memories: SearchResult[];
+}
+
+export interface ChatGenerationResult {
+  responseText: string;
+  proposedMemoryText?: string;
+  mode: "reflection" | "idea";
+  ideaCandidates: IdeaCandidate[];
+}
+
+export interface ChatProvider {
+  readonly id: ChatProviderId;
+  readonly label: string;
+  generate(input: ChatGenerationInput): Promise<ChatGenerationResult>;
 }
 
 export interface HermesPaths {
@@ -109,6 +136,9 @@ export interface ChatTurn {
   response: ChatResponse;
   memorySuggestion?: MemorySuggestion;
   savedDraft?: MemoryDraft;
+  providerId: ChatProviderId;
+  providerLabel: string;
+  providerError?: string;
 }
 
 export interface ReflectionReport {
@@ -127,4 +157,5 @@ export interface DoctorReport {
   approvedMemoryCount: number;
   externalConnectorsConfigured: false;
   toolsConfigured: false;
+  chatProviderLabel: string;
 }
