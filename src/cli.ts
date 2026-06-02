@@ -14,6 +14,7 @@ import {
   doctor,
   editApprovedMemory,
   exportApprovedMemories,
+  exportProjectMemoryPack,
   initHermes,
   intakeFile,
   intakeText,
@@ -173,6 +174,52 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
     });
 
   program
+    .command("memory-pack")
+    .description("Export selected active approved memories as a Markdown project context packet")
+    .requiredOption("--title <title>", "project name/title")
+    .option("--query <query>", "select active approved memories matching this query")
+    .option("--ids <ids>", "comma-separated active approved memory ids")
+    .option("--current-next-step <text>", "optional current next step")
+    .option("--do-not-relitigate <text>", "optional settled paths or constraints")
+    .option("--out <path>", "Markdown output path under .hermes/export")
+    .action(
+      (options: {
+        title: string;
+        query?: string;
+        ids?: string;
+        currentNextStep?: string;
+        doNotRelitigate?: string;
+        out?: string;
+      }) => {
+        if (options.ids && options.query) {
+          throw new Error("Use --ids or --query, not both.");
+        }
+        if (!options.ids && !options.query) {
+          throw new Error("Use --query or --ids to select active approved memories.");
+        }
+
+        const memoryIds = options.ids
+          ? parseMemoryIdList(options.ids)
+          : searchApprovedMemories(options.query ?? "", runtime).map(({ memory }) => memory.id);
+        if (memoryIds.length === 0) {
+          throw new Error("No active approved memories matched the selection.");
+        }
+
+        const result = exportProjectMemoryPack(
+          {
+            title: options.title,
+            currentNextStep: options.currentNextStep,
+            doNotRelitigate: options.doNotRelitigate,
+            memoryIds,
+            outPath: options.out
+          },
+          runtime
+        );
+        out(formatExportPath(result.exportPath));
+      }
+    );
+
+  program
     .command("doctor")
     .description("Print local database and safety posture diagnostics")
     .action(() => {
@@ -283,6 +330,23 @@ function parseDraftId(value: string): number {
     throw new Error("Draft id must be a positive integer.");
   }
   return draftId;
+}
+
+function parseMemoryIdList(value: string): number[] {
+  const ids: number[] = [];
+  for (const part of value.split(",")) {
+    const parsed = Number.parseInt(part.trim(), 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new Error("Memory ids must be positive integers.");
+    }
+    if (!ids.includes(parsed)) {
+      ids.push(parsed);
+    }
+  }
+  if (ids.length === 0) {
+    throw new Error("At least one memory id is required.");
+  }
+  return ids;
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";

@@ -234,3 +234,10 @@ export interface DoctorReport {
   toolsConfigured: false;
   chatProviderLabel: string;
 }
+
+export interface ProjectMemoryPackExport {
+  exportPath: string;
+  markdown: string;
+  generatedAt: string;
+  memoryIds: number[];
+}

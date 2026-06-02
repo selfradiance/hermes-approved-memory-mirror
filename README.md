@@ -103,7 +103,8 @@ In the UI:
 6. Review memory suggestions, then approve a memory or dismiss it.
 7. Add a note and save it for review.
 8. Open **Manage memories** (link in the top navigation, page at `/memories`) to search, edit, or retire your approved memories, and to inspect retired/superseded ones.
-9. Open `Diagnostics` (small footer link to `/system`) only when you want setup diagnostics, deterministic reflection, or local JSON export.
+9. Open **Project memory pack** (link in the top navigation, page at `/memory-pack`) to export selected active approved memories as a Markdown packet for a coding assistant.
+10. Open `Diagnostics` (small footer link to `/system`) only when you want setup diagnostics, deterministic reflection, or local JSON export.
 
 Only approved memories are used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve a memory.
 
@@ -116,7 +117,7 @@ What the UI cannot do:
 - No automatic approved-memory writes; the optional Claude API provider can propose memory text but only as a "save for review" suggestion.
 - No outbound network calls other than the configured Claude API model endpoint, and only when you opt in via environment variables.
 - No filesystem crawl; file intake still reads one explicitly supplied file only.
-- No writes outside `.hermes/`, except existing explicit export under `.hermes/export/`.
+- No writes outside `.hermes/`; explicit JSON and Markdown exports stay under `.hermes/export/`.
 
 ## Organic Memory Capture
 
@@ -147,6 +148,16 @@ chat message -> memory suggestion -> save for review -> approve memory -> approv
 ```
 
 In local deterministic mode the detector is local and rule-based. In optional Claude API mode the model may also propose a suggestion. In both modes a suggestion is only saved for review on your action, never browsed for, and never turned into an approved memory without explicit approval.
+
+## Project Memory Pack Export
+
+Project Memory Pack Export creates a clean Markdown context packet from selected active approved memories. It is designed for James's Claude Code / Codex workflow: copy/paste durable project context into a current work order without giving the coding assistant access to the memory store.
+
+In the UI, open **Project memory pack** at `/memory-pack`, search approved memories, select the memories to include, enter a project name, and optionally add the current next step or "do not relitigate" notes. Export writes a Markdown file under `.hermes/export/` and shows the Markdown preview for easy copying.
+
+The packet includes the generated timestamp, a note that it came from human-approved memories, project title, optional next-step and do-not-relitigate sections, selected approved memories grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the packet is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
+
+This feature does not connect to agents, MCP, GitHub, editors, shells, accounts, or external services. It does not write into any repo. It exports active approved memory only and grants no action authority. The approval invariant is unchanged: only explicit human approval creates approved memory.
 
 ## Sources (Markdown / Text Import)
 
@@ -199,6 +210,7 @@ npx tsx src/cli.ts search "Seedance"
 npx tsx src/cli.ts reflect "What video workflow should I reuse for Zion Skank?"
 npx tsx src/cli.ts chat
 npx tsx src/cli.ts export --json
+npx tsx src/cli.ts memory-pack --query "Seedance" --title "Seedance packet" --out .hermes/export/seedance-pack.md
 npx tsx src/cli.ts doctor
 ```
 
@@ -279,7 +291,7 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 3. `approve <draft-id>` writes an approved memory entry and audit events.
 4. `reject <draft-id>` marks a draft rejected and writes an audit event.
 5. Explicit edit/retire controls can supersede or retire an approved memory without hard-deleting history.
-6. Web chat, terminal chat, `search`, `list`, `reflect`, and `export` use active approved memory only.
+6. Web chat, terminal chat, `search`, `list`, `reflect`, JSON export, and Project Memory Pack export use active approved memory only.
 
 ## Chat Provider Interface
 

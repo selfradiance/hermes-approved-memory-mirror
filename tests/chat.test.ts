@@ -56,6 +56,35 @@ describe("HERmes v0.2 chat", () => {
     expect(program.commands.some((command) => command.name() === "chat")).toBe(true);
   });
 
+  it("memory-pack CLI exports matching approved memories", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    approveText(root, "CLI memory pack export should stay a Markdown copy-paste packet.");
+    const output: string[] = [];
+    const program = createProgram({
+      ...runtime(root),
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "memory-pack",
+        "--query",
+        "CLI memory pack",
+        "--title",
+        "CLI packet",
+        "--out",
+        ".hermes/export/cli-pack.md"
+      ],
+      { from: "user" }
+    );
+
+    const exportPath = path.join(root, ".hermes", "export", "cli-pack.md");
+    expect(output.join("\n")).toContain(`Export written: ${exportPath}`);
+    expect(fs.readFileSync(exportPath, "utf8")).toContain("# Project Memory Pack: CLI packet");
+    expect(fs.readFileSync(exportPath, "utf8")).toContain("CLI memory pack export should stay");
+  });
+
   it("retrieves relevant approved memories for chat", () => {
     const root = makeProject();
     initHermes(runtime(root));

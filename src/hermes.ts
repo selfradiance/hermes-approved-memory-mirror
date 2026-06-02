@@ -13,12 +13,22 @@ import type {
   MemoryDraft,
   MemoryEntry,
   MemoryEvent,
+  ProjectMemoryPackExport,
   ReflectionReport,
   SearchResult
 } from "./types.js";
 
 const BASIS_NOTE = "Reflection is based only on approved local memory." as const;
 const ACTIVE_MEMORY_WHERE = "status = 'approved' AND deleted_at IS NULL AND retired_at IS NULL";
+const MEMORY_PACK_FOOTER =
+  "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order.";
+const MEMORY_PACK_GROUPS = [
+  "Project decisions",
+  "Preferences / working style",
+  "Creative workflow",
+  "Cautions / risks",
+  "Other"
+] as const;
 const REFLECTION_STOPWORDS = new Set([
   "about",
   "after",
@@ -476,6 +486,77 @@ export function exportApprovedMemories(options: HermesRuntimeOptions = {}): stri
   }
 }
 
+export function exportProjectMemoryPack(
+  input: {
+    title: string;
+    currentNextStep?: string;
+    doNotRelitigate?: string;
+    memoryIds: number[];
+    outPath?: string;
+    generatedAt?: Date;
+  },
+  options: HermesRuntimeOptions = {}
+): ProjectMemoryPackExport {
+  const title = normalizeMemoryPackField(input.title);
+  if (!title) {
+    throw new Error("Project title is required.");
+  }
+
+  const memoryIds = uniquePositiveIds(input.memoryIds);
+  if (memoryIds.length === 0) {
+    throw new Error("Select at least one active approved memory.");
+  }
+
+  const generatedDate = input.generatedAt ?? new Date();
+  if (Number.isNaN(generatedDate.getTime())) {
+    throw new Error("Generated timestamp is invalid.");
+  }
+  const generatedAt = generatedDate.toISOString();
+  const paths = resolveHermesPaths(options);
+  const db = openExistingDb(options);
+
+  try {
+    const activeMemories = db
+      .prepare(`SELECT * FROM memory_entries WHERE ${ACTIVE_MEMORY_WHERE} ORDER BY id ASC`)
+      .all() as MemoryEntry[];
+    const activeById = new Map(activeMemories.map((memory) => [memory.id, memory]));
+    const missingIds = memoryIds.filter((id) => !activeById.has(id));
+    if (missingIds.length > 0) {
+      throw new Error(`Active approved memory ${formatIdList(missingIds)} was not found.`);
+    }
+
+    const selected = activeMemories.filter((memory) => memoryIds.includes(memory.id));
+    const markdown = buildProjectMemoryPackMarkdown({
+      title,
+      currentNextStep: normalizeMemoryPackField(input.currentNextStep ?? ""),
+      doNotRelitigate: normalizeMemoryPackField(input.doNotRelitigate ?? ""),
+      generatedAt,
+      memories: selected
+    });
+    const exportPath = resolveMemoryPackExportPath(paths, input.outPath, generatedDate);
+    fs.mkdirSync(path.dirname(exportPath), { recursive: true });
+    fs.writeFileSync(exportPath, `${markdown}\n`, "utf8");
+
+    insertEvent(db, {
+      event_type: "project_memory_pack_exported",
+      details: {
+        exportPath,
+        projectTitle: title,
+        memoryIds: selected.map((memory) => memory.id)
+      }
+    });
+
+    return {
+      exportPath,
+      markdown,
+      generatedAt,
+      memoryIds: selected.map((memory) => memory.id)
+    };
+  } finally {
+    db.close();
+  }
+}
+
 export function doctor(options: HermesRuntimeOptions = {}): DoctorReport {
   const paths = resolveHermesPaths(options);
   const dbExists = fs.existsSync(paths.dbPath);
@@ -758,4 +839,148 @@ function formatCounts(counts: Map<string, number>): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+type MemoryPackGroup = (typeof MEMORY_PACK_GROUPS)[number];
+
+function buildProjectMemoryPackMarkdown(input: {
+  title: string;
+  currentNextStep: string;
+  doNotRelitigate: string;
+  generatedAt: string;
+  memories: MemoryEntry[];
+}): string {
+  const grouped = new Map<MemoryPackGroup, MemoryEntry[]>(
+    MEMORY_PACK_GROUPS.map((group) => [group, []])
+  );
+  for (const memory of input.memories) {
+    grouped.get(memoryPackGroupForMemory(memory))?.push(memory);
+  }
+
+  const lines = [
+    `# Project Memory Pack: ${input.title}`,
+    "",
+    `Generated: ${input.generatedAt}`,
+    "",
+    "This packet was exported from human-approved memories.",
+    "",
+    `Project: ${input.title}`,
+    ""
+  ];
+
+  if (input.currentNextStep) {
+    lines.push("## Current Next Step", "", input.currentNextStep, "");
+  }
+  if (input.doNotRelitigate) {
+    lines.push("## Do Not Relitigate", "", input.doNotRelitigate, "");
+  }
+
+  lines.push("## Included Approved Memories", "");
+  for (const group of MEMORY_PACK_GROUPS) {
+    lines.push(`### ${group}`, "");
+    const memories = grouped.get(group) ?? [];
+    if (memories.length === 0) {
+      lines.push("_No selected memories in this group._", "");
+      continue;
+    }
+    for (const memory of memories) {
+      lines.push(...formatMemoryPackMemory(memory), "");
+    }
+  }
+
+  lines.push("## Boundary", "", MEMORY_PACK_FOOTER);
+  return lines.join("\n").trimEnd();
+}
+
+function formatMemoryPackMemory(memory: MemoryEntry): string[] {
+  const tags = parseTags(memory.tags_json);
+  return [
+    `#### Memory ${memory.id}`,
+    "",
+    `- Memory id: ${memory.id}`,
+    `- Category: ${memory.category}`,
+    `- Tags: ${tags.length > 0 ? tags.join(", ") : "(none)"}`,
+    `- Created / approved: ${memory.created_at}`,
+    "",
+    "Approved content:",
+    "",
+    ...formatBlockquote(memory.content)
+  ];
+}
+
+function memoryPackGroupForMemory(memory: MemoryEntry): MemoryPackGroup {
+  const category = memory.category.toLowerCase();
+  const tags = parseTags(memory.tags_json).map((tag) => tag.toLowerCase());
+  const haystack = [category, ...tags, memory.content.toLowerCase()].join(" ");
+
+  if (/\b(caution|risk|safety|boundary|guardrail|must not|never|do not|avoid|forbidden)\b/.test(haystack)) {
+    return "Cautions / risks";
+  }
+  if (
+    category.includes("creative") ||
+    tags.some((tag) =>
+      ["creative", "creative-workflow", "storyboard", "seedance", "zion-skank", "video", "prompt"].includes(tag)
+    )
+  ) {
+    return "Creative workflow";
+  }
+  if (category.includes("preference") || /\b(prefer|preference|style|default|working style)\b/.test(haystack)) {
+    return "Preferences / working style";
+  }
+  if (category.includes("project") || /\b(project|decision|decided|settled|scope|architecture)\b/.test(haystack)) {
+    return "Project decisions";
+  }
+  return "Other";
+}
+
+function formatBlockquote(content: string): string[] {
+  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().split("\n");
+  return lines.map((line) => `> ${line}`);
+}
+
+function resolveMemoryPackExportPath(paths: HermesPaths, outPath: string | undefined, generatedDate: Date): string {
+  const exportRoot = path.resolve(paths.exportDir);
+  const candidate = outPath?.trim()
+    ? path.isAbsolute(outPath)
+      ? path.resolve(outPath)
+      : path.resolve(paths.projectRoot, outPath)
+    : path.join(exportRoot, `project-memory-pack-${formatFileTimestamp(generatedDate)}.md`);
+
+  const resolved = path.resolve(candidate);
+  const relative = path.relative(exportRoot, resolved);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Project memory pack output must be under .hermes/export.");
+  }
+  if (path.extname(resolved).toLowerCase() !== ".md") {
+    throw new Error("Project memory pack output must be a Markdown .md file.");
+  }
+  return resolved;
+}
+
+function normalizeMemoryPackField(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
+function uniquePositiveIds(ids: number[]): number[] {
+  const output: number[] = [];
+  for (const id of ids) {
+    if (!Number.isInteger(id) || id <= 0) {
+      continue;
+    }
+    if (!output.includes(id)) {
+      output.push(id);
+    }
+  }
+  return output;
+}
+
+function formatIdList(ids: number[]): string {
+  return ids.length === 1 ? String(ids[0]) : `ids ${ids.join(", ")}`;
+}
+
+function formatFileTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(
+    date.getHours()
+  )}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }

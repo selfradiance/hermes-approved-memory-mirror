@@ -19,6 +19,7 @@ import {
   editApprovedMemory,
   ensureHermesInitialized,
   exportApprovedMemories,
+  exportProjectMemoryPack,
   initHermes,
   intakeText,
   listApprovedMemories,
@@ -80,6 +81,11 @@ interface RenderState {
   suggestedDraftIds?: number[];
   longMemoryText?: string;
   showRetiredMemories?: boolean;
+  memoryPackMarkdown?: string;
+  memoryPackSelectedIds?: number[];
+  memoryPackTitle?: string;
+  memoryPackCurrentNextStep?: string;
+  memoryPackDoNotRelitigate?: string;
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -243,6 +249,40 @@ export async function handleUiRequest(
       const showRetiredMemories = url.searchParams.get("retired") === "1";
       const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
       return htmlResponse(renderManageMemoriesPage(runtime, { searchQuery, searchResults, showRetiredMemories }));
+    }
+
+    if (request.method === "GET" && url.pathname === "/memory-pack") {
+      const searchQuery = (url.searchParams.get("query") ?? "").trim();
+      const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
+      return htmlResponse(renderMemoryPackPage(runtime, { searchQuery, searchResults }));
+    }
+
+    if (request.method === "POST" && url.pathname === "/memory-pack/export") {
+      const form = await readForm(request);
+      const title = requiredFormValue(form, "title", "Project title is required.");
+      const currentNextStep = optionalFormValue(form, "currentNextStep");
+      const doNotRelitigate = optionalFormValue(form, "doNotRelitigate");
+      const memoryIds = form.getAll("memoryId").map((value) => parsePositiveInteger(value, "Memory id"));
+      const result = exportProjectMemoryPack(
+        {
+          title,
+          currentNextStep,
+          doNotRelitigate,
+          memoryIds
+        },
+        runtime
+      );
+      return htmlResponse(
+        renderMemoryPackPage(runtime, {
+          notice: { kind: "success", message: "Project memory pack exported locally." },
+          exportPath: result.exportPath,
+          memoryPackMarkdown: result.markdown,
+          memoryPackSelectedIds: result.memoryIds,
+          memoryPackTitle: title,
+          memoryPackCurrentNextStep: currentNextStep,
+          memoryPackDoNotRelitigate: doNotRelitigate
+        })
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/init") {
@@ -913,6 +953,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       <nav class="top-actions" aria-label="App actions">
         <a href="/sources">Sources</a>
         <a href="/memories">Manage memories</a>
+        <a href="/memory-pack">Project memory pack</a>
         <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
         <a href="#add-memory">Add memory</a>
       </nav>
@@ -1385,6 +1426,166 @@ function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderSt
         <div class="stack" style="margin-top: 12px;">
           ${renderMemoryResults(model)}
         </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>`;
+}
+
+function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState = {}): string {
+  const model = readUiModel(runtime, state);
+  const matchingMemories = model.searchQuery
+    ? (model.searchResults ?? []).map(({ memory }) => memory)
+    : model.approvedMemories;
+  const selectedIds = state.memoryPackSelectedIds ?? [];
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Approved Mind Mirror — Project memory pack</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17201e;
+      --muted: #66736f;
+      --line: #d9e1de;
+      --paper: #f6f8f7;
+      --panel: #ffffff;
+      --accent: #236b58;
+      --accent-strong: #174d3f;
+      --danger: #a43a32;
+      --blue: #2a5d84;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .wrap { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 42px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 18px; }
+    h1, h2 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 1.55rem; }
+    h2 { font-size: 1.08rem; }
+    a { color: var(--accent-strong); }
+    .back-link, button {
+      display: inline-flex; align-items: center; justify-content: center; min-height: 38px;
+      border-radius: 6px; padding: 8px 11px; font: inherit; font-weight: 700;
+    }
+    .back-link { border: 1px solid var(--line); background: #fbfcfb; text-decoration: none; }
+    button { border: 0; color: #fff; background: var(--accent); cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    main, .stack { display: grid; gap: 14px; }
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .hint, .meta, .empty { color: var(--muted); }
+    .hint { margin: 4px 0 0; }
+    .notice { border-radius: 8px; padding: 12px 14px; border: 1px solid var(--line); background: #eef8f4; color: var(--accent-strong); }
+    .notice.error { background: #fff2f1; color: var(--danger); border-color: #e8c6c2; }
+    .notice.info { background: #eef5fb; color: var(--blue); border-color: #c8d9e7; }
+    .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+    label { display: grid; gap: 7px; font-weight: 650; }
+    textarea, input[type="search"], input[type="text"] {
+      width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 11px 12px;
+      color: var(--ink); background: #fff; font: inherit;
+    }
+    textarea { min-height: 96px; resize: vertical; }
+    textarea.preview { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .memory-choice-list { display: grid; gap: 10px; }
+    .memory-choice {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      font-weight: 400;
+    }
+    .memory-choice:first-child { border-top: 0; padding-top: 0; }
+    .memory-choice input { margin-top: 5px; }
+    .item-title { display: block; margin: 0 0 5px; font-weight: 750; }
+    .content { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
+    @media (max-width: 760px) {
+      header, .search-row { display: grid; grid-template-columns: 1fr; }
+      button, .back-link { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Project memory pack</h1>
+        <p class="hint">Create a copy/paste context packet from selected active approved memories.</p>
+      </div>
+      <a class="back-link" href="/">Back to chat</a>
+    </header>
+    <main>
+      ${state.notice ? renderNotice(state.notice) : ""}
+      ${
+        state.exportPath && state.memoryPackMarkdown
+          ? `<section>
+        <h2>Export ready</h2>
+        <p class="notice info" style="margin-top: 12px;">Local export path: ${escapeHtml(state.exportPath)}</p>
+        <label style="margin-top: 14px;">
+          Markdown preview
+          <textarea class="preview" readonly>${escapeHtml(state.memoryPackMarkdown)}</textarea>
+        </label>
+      </section>`
+          : ""
+      }
+
+      <section>
+        <h2>Find approved memories</h2>
+        <form class="search-row" method="get" action="/memory-pack" style="margin-top: 12px;">
+          <label>
+            Search approved memory
+            <input type="search" name="query" value="${escapeAttribute(
+              model.searchQuery
+            )}" placeholder="Search text, tags, category, or source">
+          </label>
+          <button type="submit">Search</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Build packet</h2>
+        <p class="hint">Only active approved memories are available here. The export stays under .hermes/export and does not connect to coding agents.</p>
+        <form class="stack" method="post" action="/memory-pack/export" style="margin-top: 14px;">
+          <label>
+            Project name
+            <input type="text" name="title" required value="${escapeAttribute(
+              state.memoryPackTitle ?? ""
+            )}" placeholder="Project or work order name">
+          </label>
+          <label>
+            Current next step (optional)
+            <textarea name="currentNextStep" placeholder="What should the coding assistant focus on next?">${escapeHtml(
+              state.memoryPackCurrentNextStep ?? ""
+            )}</textarea>
+          </label>
+          <label>
+            Do not relitigate (optional)
+            <textarea name="doNotRelitigate" placeholder="Settled paths, rejected approaches, or constraints to preserve.">${escapeHtml(
+              state.memoryPackDoNotRelitigate ?? ""
+            )}</textarea>
+          </label>
+          <div>
+            <p class="item-title">${model.searchQuery ? "Matching active approved memories" : "Active approved memories"}</p>
+            <div class="memory-choice-list" style="margin-top: 10px;">
+              ${renderMemoryPackChoices(matchingMemories, selectedIds, model.searchQuery)}
+            </div>
+          </div>
+          <div class="actions">
+            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Export Markdown pack</button>
+          </div>
+        </form>
       </section>
     </main>
   </div>
@@ -1930,6 +2131,32 @@ function renderDraft(draft: MemoryDraft, returnContext?: DraftReturnContext): st
       <button class="danger" type="submit">Dismiss</button>
     </form>
   </article>`;
+}
+
+function renderMemoryPackChoices(memories: MemoryEntry[], selectedIds: number[], query: string): string {
+  if (memories.length === 0) {
+    return `<p class="empty">${
+      query
+        ? `No active approved memories matched "${escapeHtml(query)}".`
+        : "No active approved memories are available."
+    }</p>`;
+  }
+
+  return memories
+    .map((memory) => {
+      const checked = selectedIds.includes(memory.id) ? " checked" : "";
+      return `<label class="memory-choice">
+        <input type="checkbox" name="memoryId" value="${memory.id}"${checked}>
+        <span>
+          <span class="item-title">[${memory.id}] ${escapeHtml(memory.category)}</span>
+          <span class="meta">Created: ${escapeHtml(memory.created_at)} · Tags: ${escapeHtml(
+            formatTags(memory.tags_json)
+          )}</span>
+          <span class="content">${escapeHtml(compactText(memory.content, 320))}</span>
+        </span>
+      </label>`;
+    })
+    .join("");
 }
 
 function renderMemoryResults(model: ReturnType<typeof readUiModel>): string {

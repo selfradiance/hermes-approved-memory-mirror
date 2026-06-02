@@ -7,6 +7,7 @@ import {
   doctor,
   editApprovedMemory,
   exportApprovedMemories,
+  exportProjectMemoryPack,
   initHermes,
   intakeFile,
   intakeText,
@@ -204,6 +205,81 @@ describe("HERmes v0.1", () => {
     expect(parsed.approved_memories.map((memory: { id: number }) => memory.id)).toEqual([replacement.id]);
     expect(parsed.memory_events.map((event: { event_type: string }) => event.event_type)).toContain("memory_retired");
     expect(parsed.memory_events.map((event: { event_type: string }) => event.event_type)).toContain("memory_superseded");
+  });
+
+  it("project memory pack export writes selected active approved memories as Markdown", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText(
+      "James decided HERmes project exports should stay copy-paste only for coding assistants.",
+      runtime(root)
+    );
+    const memory = approveDraft(draft.id, runtime(root));
+
+    const result = exportProjectMemoryPack(
+      {
+        title: "HERmes coding context",
+        currentNextStep: "Wire the export through the local UI.",
+        doNotRelitigate: "Do not add MCP, connectors, or agent write access.",
+        memoryIds: [memory.id],
+        outPath: ".hermes/export/test-pack.md",
+        generatedAt: new Date("2026-06-02T15:04:05.000Z")
+      },
+      runtime(root)
+    );
+
+    expect(result.exportPath).toBe(path.join(root, ".hermes", "export", "test-pack.md"));
+    expect(fs.existsSync(result.exportPath)).toBe(true);
+    const markdown = fs.readFileSync(result.exportPath, "utf8");
+    expect(markdown).toContain("# Project Memory Pack: HERmes coding context");
+    expect(markdown).toContain("Generated: 2026-06-02T15:04:05.000Z");
+    expect(markdown).toContain("This packet was exported from human-approved memories.");
+    expect(markdown).toContain("Project: HERmes coding context");
+    expect(markdown).toContain("Wire the export through the local UI.");
+    expect(markdown).toContain("Do not add MCP, connectors, or agent write access.");
+    expect(markdown).toContain(`#### Memory ${memory.id}`);
+    expect(markdown).toContain(`- Memory id: ${memory.id}`);
+    expect(markdown).toContain("James decided HERmes project exports should stay copy-paste only");
+    expect(markdown).toContain(
+      "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order."
+    );
+  });
+
+  it("project memory pack export rejects retired, superseded, and outside output paths", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [retireDraft] = intakeText("Retired project pack memory.", runtime(root));
+    const [editDraft] = intakeText("Old project pack memory.", runtime(root));
+    const retiredMemory = approveDraft(retireDraft.id, runtime(root));
+    const oldMemory = approveDraft(editDraft.id, runtime(root));
+    retireApprovedMemory(retiredMemory.id, runtime(root));
+    const replacement = editApprovedMemory(oldMemory.id, "Replacement project pack memory.", runtime(root));
+
+    expect(() =>
+      exportProjectMemoryPack({ title: "Bad pack", memoryIds: [retiredMemory.id] }, runtime(root))
+    ).toThrow(/Active approved memory/);
+    expect(() => exportProjectMemoryPack({ title: "Bad pack", memoryIds: [oldMemory.id] }, runtime(root))).toThrow(
+      /Active approved memory/
+    );
+    expect(() =>
+      exportProjectMemoryPack(
+        { title: "Bad path", memoryIds: [replacement.id], outPath: "project-memory-pack.md" },
+        runtime(root)
+      )
+    ).toThrow(/under \.hermes\/export/);
+    expect(() =>
+      exportProjectMemoryPack(
+        { title: "Bad extension", memoryIds: [replacement.id], outPath: ".hermes/export/pack.txt" },
+        runtime(root)
+      )
+    ).toThrow(/Markdown \.md/);
+
+    const result = exportProjectMemoryPack({ title: "Good pack", memoryIds: [replacement.id] }, runtime(root));
+    expect(path.dirname(result.exportPath)).toBe(path.join(root, ".hermes", "export"));
+    expect(path.basename(result.exportPath)).toMatch(/^project-memory-pack-\d{8}-\d{6}\.md$/);
+    expect(result.markdown).toContain("Replacement project pack memory.");
+    expect(result.markdown).not.toContain("Retired project pack memory.");
+    expect(result.markdown).not.toContain("Old project pack memory.");
   });
 
   it("file intake does not crawl directories", () => {

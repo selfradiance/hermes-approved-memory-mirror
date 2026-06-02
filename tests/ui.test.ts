@@ -10,7 +10,8 @@ import {
   listApprovedMemories,
   listPendingDrafts,
   listRetiredMemories,
-  reflectOnApprovedMemory
+  reflectOnApprovedMemory,
+  retireApprovedMemory
 } from "../src/hermes.js";
 import { DEFAULT_UI_HOST, handleUiRequest, startUiServer } from "../src/ui.js";
 import { listSources } from "../src/sources.js";
@@ -353,6 +354,17 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain('href="/memories"');
   });
 
+  it("shows a visible Project memory pack entry point in the main page navigation", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Project memory pack");
+    expect(html).toContain('href="/memory-pack"');
+  });
+
   it("manage memories page renders active approved memories with edit and retire controls", async () => {
     const root = makeProject();
     initHermes(runtime(root));
@@ -412,6 +424,77 @@ describe("HERmes Local Web Chat UI", () => {
     expect(active[0]?.id).toBe(memory.id);
     expect(active[0]?.content).toBe("Durable memory the model must not touch.");
     expect(listRetiredMemories(runtime(root))).toHaveLength(0);
+    expect(fs.existsSync(path.join(root, ".hermes", "export"))).toBe(false);
+  });
+
+  it("memory pack page renders active approved memories with checkboxes", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [activeDraft] = intakeText("Approved memory pack UI memory.", runtime(root));
+    const [retiredDraft] = intakeText("Retired memory pack UI memory.", runtime(root));
+    approveDraft(activeDraft.id, runtime(root));
+    const retired = approveDraft(retiredDraft.id, runtime(root));
+    retireApprovedMemory(retired.id, runtime(root));
+
+    const response = await handleUiRequest(getRequest("/memory-pack"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("<h1>Project memory pack</h1>");
+    expect(html).toContain("Approved memory pack UI memory.");
+    expect(html).not.toContain("Retired memory pack UI memory.");
+    expect(html).toContain('type="checkbox" name="memoryId"');
+    expect(html).toContain('action="/memory-pack/export"');
+  });
+
+  it("memory pack search shows matching active approved memories only", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [amberDraft] = intakeText("Amber project memory pack preference.", runtime(root));
+    const [cobaltDraft] = intakeText("Cobalt project memory pack preference.", runtime(root));
+    approveDraft(amberDraft.id, runtime(root));
+    approveDraft(cobaltDraft.id, runtime(root));
+
+    const response = await handleUiRequest(getRequest("/memory-pack?query=Amber"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Amber project memory pack preference.");
+    expect(html).not.toContain("Cobalt project memory pack preference.");
+  });
+
+  it("memory pack export writes Markdown under .hermes/export and shows a preview", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Coding agents should receive approved context only.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/memory-pack/export", {
+        title: "HERmes export test",
+        currentNextStep: "Review the Markdown preview.",
+        doNotRelitigate: "Do not connect to agents.",
+        memoryId: String(memory.id)
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const exportDir = path.join(root, ".hermes", "export");
+    const files = fs.readdirSync(exportDir).filter((file) => file.endsWith(".md"));
+    const markdown = fs.readFileSync(path.join(exportDir, files[0] ?? ""), "utf8");
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Project memory pack exported locally.");
+    expect(html).toContain("Local export path:");
+    expect(html).toContain("Markdown preview");
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^project-memory-pack-\d{8}-\d{6}\.md$/);
+    expect(markdown).toContain("# Project Memory Pack: HERmes export test");
+    expect(markdown).toContain(`#### Memory ${memory.id}`);
+    expect(markdown).toContain("Coding agents should receive approved context only.");
+    expect(markdown).toContain(
+      "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order."
+    );
   });
 
   it("editing an approved memory through the UI creates an active replacement", async () => {

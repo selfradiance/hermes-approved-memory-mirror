@@ -42,7 +42,7 @@ Adding a future provider — for example an OpenAI-compatible endpoint, DeepSeek
 2. Deterministic proposal logic creates pending drafts.
 3. Review displays pending drafts.
 4. Approval writes an approved memory entry and audit events.
-5. Search, reflection, listing, web chat, terminal chat, and export read approved memory only.
+5. Search, reflection, listing, web chat, terminal chat, JSON export, and Project Memory Pack export read active approved memory only.
 6. Chat can produce an organic memory suggestion from deterministic durable-statement rules.
 7. Saving a suggestion for review writes a pending draft only.
 8. Chat "Save for review" writes the latest exchange as a pending draft only.
@@ -67,6 +67,20 @@ approved memory -> explicit retire -> tombstoned memory excluded from normal ret
 Edits and retirements are local, explicit human actions. Editing creates a new approved row that points to the prior row via `supersedes_id`, then marks the prior row superseded/retired from normal use. Retiring marks the row as a tombstone rather than hard-deleting it. Retired and superseded memories remain inspectable on the Manage memories page (`/memories?retired=1`) and in `memory_events`, but are excluded from normal chat retrieval, search, reflection, and export by default. There is no hard delete by default and no automatic cleanup or staleness detection.
 
 As of v0.4.8 these controls are exposed on a dedicated **Manage memories** page (`GET /memories`, rendered by `renderManageMemoriesPage`), reachable from a clearly visible "Manage memories" link in the main chat page's top navigation. The page lists active approved memories with inline Edit and Retire controls, offers approved-memory search, and links to the retired/superseded view. `POST /memories/edit` and `POST /memories/retire` re-render this page. Earlier (v0.4.7) the same controls were only rendered on the Diagnostics/System page, reachable solely via the small footer link, which made them effectively undiscoverable during dogfooding; the System page now links to Manage memories instead of duplicating the edit/retire surface. No backend, retrieval, or approval behavior changed — this was a discoverability repair only.
+
+Project Memory Pack Export flow (v0.4.9):
+
+```text
+active approved memories -> explicit selection -> Markdown packet under .hermes/export -> copy/paste into coding assistant
+```
+
+`exportProjectMemoryPack` in `src/hermes.ts` is a local export helper, not an integration layer. It validates the selected ids against active approved memories only, rejects retired/superseded/missing ids, groups selected memories deterministically, writes a Markdown file under `.hermes/export/`, and records a local export event. Output paths supplied by the CLI must resolve under `.hermes/export/` and end in `.md`.
+
+The UI page (`GET /memory-pack`, rendered by `renderMemoryPackPage`) is reachable from the main navigation as **Project memory pack**. It lets James search active approved memories, choose checkboxes, provide a project title, optional current next step, and optional "do not relitigate" notes, then posts to `POST /memory-pack/export` through the same local UI POST guard as the rest of the app. After export it shows the local path and a Markdown preview.
+
+The CLI wrapper (`hermes memory-pack --query "..." --title "..." --out .hermes/export/foo.md`) selects active approved memories by query, or by explicit `--ids`, and delegates to the same helper. It does not connect to agents and does not write into any repo.
+
+The Markdown packet is intended as copy/paste context for Claude Code/Codex. It states that it was exported from human-approved memories, includes selected memory ids/categories/tags/content/timestamps, and ends with an action-boundary footer: it is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order. The approval invariant is unchanged: only explicit human approval writes approved memory.
 
 Source library flow (v0.4.0):
 
@@ -103,7 +117,7 @@ As of v0.4.3 the Sources page shows the suggestions just created by the latest "
 
 `src/ui.ts` starts a Node HTTP server bound to loopback by default at `127.0.0.1:8787`. It refuses non-loopback hosts and rejects non-local/cross-site state-changing requests. The UI ensures the local SQLite schema exists on first request, so normal use does not require an initialization button.
 
-The default page is intentionally chat-first: app name, a subtle conversation-mode label, chat history, message input, assistant responses, subtle memory sources, organic memory suggestions, save-for-review, add-memory, and review of memory suggestions. The top navigation links to **Sources** and **Manage memories** (`/memories`), the two everyday management surfaces. Approved-memory search, edit, and retire live on the Manage memories page. Technical diagnostics, database path, table status, deterministic reflection, and local JSON export live behind `/system`, reached only via a small footer "Diagnostics" link. The page opens in Local mode with no API key required; Claude mode is optional and only affects chat-response wording when configured.
+The default page is intentionally chat-first: app name, a subtle conversation-mode label, chat history, message input, assistant responses, subtle memory sources, organic memory suggestions, save-for-review, add-memory, and review of memory suggestions. The top navigation links to **Sources**, **Manage memories** (`/memories`), and **Project memory pack** (`/memory-pack`), the everyday memory surfaces. Approved-memory search, edit, and retire live on the Manage memories page. Project Memory Pack Export lives on its own page and writes Markdown under `.hermes/export/`. Technical diagnostics, database path, table status, deterministic reflection, and local JSON export live behind `/system`, reached only via a small footer "Diagnostics" link. The page opens in Local mode with no API key required; Claude mode is optional and only affects chat-response wording when configured.
 
 The server calls the existing service functions directly. It introduces no external connectors, MCP, browser automation, shell execution, scheduler, daemon, subagents, account access, or autonomous actions. The only optional outbound network call is the configured Claude API model endpoint, used purely for chat text generation when API mode is enabled; the model still receives no tools and cannot approve memory.
 
