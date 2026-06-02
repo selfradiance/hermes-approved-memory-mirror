@@ -73,6 +73,8 @@ describe("HERmes v0.2 chat", () => {
         "CLI memory pack",
         "--title",
         "CLI packet",
+        "--settled-decisions",
+        "Keep this as a copy-paste export.",
         "--out",
         ".hermes/export/cli-pack.md"
       ],
@@ -82,7 +84,17 @@ describe("HERmes v0.2 chat", () => {
     const exportPath = path.join(root, ".hermes", "export", "cli-pack.md");
     expect(output.join("\n")).toContain(`Export written: ${exportPath}`);
     expect(fs.readFileSync(exportPath, "utf8")).toContain("# Project Memory Pack: CLI packet");
+    expect(fs.readFileSync(exportPath, "utf8")).toContain("## Settled decisions / things not to reopen");
     expect(fs.readFileSync(exportPath, "utf8")).toContain("CLI memory pack export should stay");
+  });
+
+  it("memory-pack CLI help uses settled-decisions wording", () => {
+    const program = createProgram();
+    const command = program.commands.find((candidate) => candidate.name() === "memory-pack");
+
+    expect(command?.helpInformation()).toContain("--settled-decisions <text>");
+    expect(command?.helpInformation()).toContain("optional settled decisions or things not to reopen");
+    expect(command?.helpInformation()).not.toContain(["re", "liti", "gate"].join(""));
   });
 
   it("retrieves relevant approved memories for chat", () => {

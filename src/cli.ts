@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import type { Readable, Writable } from "node:stream";
@@ -47,12 +47,13 @@ export interface CliRuntimeOptions extends HermesRuntimeOptions {
 
 export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   const out = (message: string) => (runtime.writeOut ?? process.stdout.write.bind(process.stdout))(`${message}\n`);
+  let deprecatedSettledDecisions: string | undefined;
 
   const program = new Command();
   program
     .name("hermes")
     .description("HERmes approved local memory mirror")
-    .version("0.4.9");
+    .version("0.4.10");
 
   program
     .command("init")
@@ -180,7 +181,15 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
     .option("--query <query>", "select active approved memories matching this query")
     .option("--ids <ids>", "comma-separated active approved memory ids")
     .option("--current-next-step <text>", "optional current next step")
-    .option("--do-not-relitigate <text>", "optional settled paths or constraints")
+    .option("--settled-decisions <text>", "optional settled decisions or things not to reopen")
+    .addOption(
+      new Option("--do-not-relitigate <text>", "deprecated alias for --settled-decisions")
+        .hideHelp()
+        .argParser((value) => {
+          deprecatedSettledDecisions = value;
+          return value;
+        })
+    )
     .option("--out <path>", "Markdown output path under .hermes/export")
     .action(
       (options: {
@@ -188,7 +197,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
         query?: string;
         ids?: string;
         currentNextStep?: string;
-        doNotRelitigate?: string;
+        settledDecisions?: string;
         out?: string;
       }) => {
         if (options.ids && options.query) {
@@ -209,7 +218,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
           {
             title: options.title,
             currentNextStep: options.currentNextStep,
-            doNotRelitigate: options.doNotRelitigate,
+            settledDecisions: options.settledDecisions ?? deprecatedSettledDecisions,
             memoryIds,
             outPath: options.out
           },

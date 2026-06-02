@@ -153,9 +153,9 @@ In local deterministic mode the detector is local and rule-based. In optional Cl
 
 Project Memory Pack Export creates a clean Markdown context packet from selected active approved memories. It is designed for James's Claude Code / Codex workflow: copy/paste durable project context into a current work order without giving the coding assistant access to the memory store.
 
-In the UI, open **Project memory pack** at `/memory-pack`, search approved memories, select the memories to include, enter a project name, and optionally add the current next step or "do not relitigate" notes. Export writes a Markdown file under `.hermes/export/` and shows the Markdown preview for easy copying.
+In the UI, open **Project memory pack** at `/memory-pack`, search approved memories, select the memories to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. Export writes a Markdown file under `.hermes/export/` and shows the Markdown preview for easy copying.
 
-The packet includes the generated timestamp, a note that it came from human-approved memories, project title, optional next-step and do-not-relitigate sections, selected approved memories grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the packet is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
+The packet includes the generated timestamp, a note that it came from human-approved memories, project title, optional next-step and settled-decisions sections, selected approved memories grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the packet is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
 
 This feature does not connect to agents, MCP, GitHub, editors, shells, accounts, or external services. It does not write into any repo. It exports active approved memory only and grants no action authority. The approval invariant is unchanged: only explicit human approval creates approved memory.
 
@@ -210,7 +210,7 @@ npx tsx src/cli.ts search "Seedance"
 npx tsx src/cli.ts reflect "What video workflow should I reuse for Zion Skank?"
 npx tsx src/cli.ts chat
 npx tsx src/cli.ts export --json
-npx tsx src/cli.ts memory-pack --query "Seedance" --title "Seedance packet" --out .hermes/export/seedance-pack.md
+npx tsx src/cli.ts memory-pack --query "Seedance" --title "Seedance packet" --settled-decisions "Keep the export copy/paste only." --out .hermes/export/seedance-pack.md
 npx tsx src/cli.ts doctor
 ```
 

@@ -445,6 +445,10 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("Retired memory pack UI memory.");
     expect(html).toContain('type="checkbox" name="memoryId"');
     expect(html).toContain('action="/memory-pack/export"');
+    expect(html).toContain("Settled decisions / things not to reopen");
+    expect(html).toContain(
+      "Add decisions that are already settled, so a coding assistant does not waste time suggesting them again."
+    );
   });
 
   it("memory pack search shows matching active approved memories only", async () => {
@@ -473,7 +477,7 @@ describe("HERmes Local Web Chat UI", () => {
       formRequest("/memory-pack/export", {
         title: "HERmes export test",
         currentNextStep: "Review the Markdown preview.",
-        doNotRelitigate: "Do not connect to agents.",
+        settledDecisions: "Do not connect to agents.",
         memoryId: String(memory.id)
       }),
       runtime(root)
@@ -490,6 +494,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^project-memory-pack-\d{8}-\d{6}\.md$/);
     expect(markdown).toContain("# Project Memory Pack: HERmes export test");
+    expect(markdown).toContain("## Settled decisions / things not to reopen");
     expect(markdown).toContain(`#### Memory ${memory.id}`);
     expect(markdown).toContain("Coding agents should receive approved context only.");
     expect(markdown).toContain(

@@ -490,7 +490,7 @@ export function exportProjectMemoryPack(
   input: {
     title: string;
     currentNextStep?: string;
-    doNotRelitigate?: string;
+    settledDecisions?: string;
     memoryIds: number[];
     outPath?: string;
     generatedAt?: Date;
@@ -529,7 +529,7 @@ export function exportProjectMemoryPack(
     const markdown = buildProjectMemoryPackMarkdown({
       title,
       currentNextStep: normalizeMemoryPackField(input.currentNextStep ?? ""),
-      doNotRelitigate: normalizeMemoryPackField(input.doNotRelitigate ?? ""),
+      settledDecisions: normalizeMemoryPackField(input.settledDecisions ?? ""),
       generatedAt,
       memories: selected
     });
@@ -846,7 +846,7 @@ type MemoryPackGroup = (typeof MEMORY_PACK_GROUPS)[number];
 function buildProjectMemoryPackMarkdown(input: {
   title: string;
   currentNextStep: string;
-  doNotRelitigate: string;
+  settledDecisions: string;
   generatedAt: string;
   memories: MemoryEntry[];
 }): string {
@@ -871,8 +871,8 @@ function buildProjectMemoryPackMarkdown(input: {
   if (input.currentNextStep) {
     lines.push("## Current Next Step", "", input.currentNextStep, "");
   }
-  if (input.doNotRelitigate) {
-    lines.push("## Do Not Relitigate", "", input.doNotRelitigate, "");
+  if (input.settledDecisions) {
+    lines.push("## Settled decisions / things not to reopen", "", input.settledDecisions, "");
   }
 
   lines.push("## Included Approved Memories", "");

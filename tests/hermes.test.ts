@@ -220,7 +220,7 @@ describe("HERmes v0.1", () => {
       {
         title: "HERmes coding context",
         currentNextStep: "Wire the export through the local UI.",
-        doNotRelitigate: "Do not add MCP, connectors, or agent write access.",
+        settledDecisions: "Do not add MCP, connectors, or agent write access.",
         memoryIds: [memory.id],
         outPath: ".hermes/export/test-pack.md",
         generatedAt: new Date("2026-06-02T15:04:05.000Z")
@@ -237,6 +237,7 @@ describe("HERmes v0.1", () => {
     expect(markdown).toContain("Project: HERmes coding context");
     expect(markdown).toContain("Wire the export through the local UI.");
     expect(markdown).toContain("Do not add MCP, connectors, or agent write access.");
+    expect(markdown).toContain("## Settled decisions / things not to reopen");
     expect(markdown).toContain(`#### Memory ${memory.id}`);
     expect(markdown).toContain(`- Memory id: ${memory.id}`);
     expect(markdown).toContain("James decided HERmes project exports should stay copy-paste only");

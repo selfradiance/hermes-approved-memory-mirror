@@ -85,7 +85,7 @@ interface RenderState {
   memoryPackSelectedIds?: number[];
   memoryPackTitle?: string;
   memoryPackCurrentNextStep?: string;
-  memoryPackDoNotRelitigate?: string;
+  memoryPackSettledDecisions?: string;
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -261,13 +261,13 @@ export async function handleUiRequest(
       const form = await readForm(request);
       const title = requiredFormValue(form, "title", "Project title is required.");
       const currentNextStep = optionalFormValue(form, "currentNextStep");
-      const doNotRelitigate = optionalFormValue(form, "doNotRelitigate");
+      const settledDecisions = optionalFormValue(form, "settledDecisions");
       const memoryIds = form.getAll("memoryId").map((value) => parsePositiveInteger(value, "Memory id"));
       const result = exportProjectMemoryPack(
         {
           title,
           currentNextStep,
-          doNotRelitigate,
+          settledDecisions,
           memoryIds
         },
         runtime
@@ -280,7 +280,7 @@ export async function handleUiRequest(
           memoryPackSelectedIds: result.memoryIds,
           memoryPackTitle: title,
           memoryPackCurrentNextStep: currentNextStep,
-          memoryPackDoNotRelitigate: doNotRelitigate
+          memoryPackSettledDecisions: settledDecisions
         })
       );
     }
@@ -1571,9 +1571,10 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
             )}</textarea>
           </label>
           <label>
-            Do not relitigate (optional)
-            <textarea name="doNotRelitigate" placeholder="Settled paths, rejected approaches, or constraints to preserve.">${escapeHtml(
-              state.memoryPackDoNotRelitigate ?? ""
+            Settled decisions / things not to reopen (optional)
+            <span class="hint">Add decisions that are already settled, so a coding assistant does not waste time suggesting them again.</span>
+            <textarea name="settledDecisions" placeholder="Settled decisions">${escapeHtml(
+              state.memoryPackSettledDecisions ?? ""
             )}</textarea>
           </label>
           <div>
