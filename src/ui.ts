@@ -136,6 +136,15 @@ export async function handleUiRequest(
     ensureHermesInitialized(runtime);
 
     if (request.method === "GET" && url.pathname === "/") {
+      const searchQuery = (url.searchParams.get("query") ?? "").trim();
+      const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
+      const selectedSavedContextPackId = parseOptionalPositiveInteger(url.searchParams.get("savedPack") ?? "");
+      return htmlResponse(
+        renderMemoryPackPage(runtime, { searchQuery, searchResults, selectedSavedContextPackId })
+      );
+    }
+
+    if (request.method === "GET" && url.pathname === "/capture") {
       return htmlResponse(renderPage(runtime));
     }
 
@@ -296,7 +305,7 @@ export async function handleUiRequest(
       );
       return htmlResponse(
         renderMemoryPackPage(runtime, {
-          notice: { kind: "success", message: "LLM context pack exported locally." },
+          notice: { kind: "success", message: "Crate generated. Copy, download, or save it below." },
           exportPath: result.exportPath,
           memoryPackMarkdown: result.markdown,
           memoryPackSelectedIds: result.memoryIds,
@@ -309,14 +318,14 @@ export async function handleUiRequest(
 
     if (request.method === "POST" && url.pathname === "/memory-pack/save") {
       const form = await readForm(request);
-      const title = requiredFormValue(form, "title", "Context pack title is required.");
-      const markdown = requiredFormValue(form, "markdown", "Generated context pack is required.");
+      const title = requiredFormValue(form, "title", "Crate title is required.");
+      const markdown = requiredFormValue(form, "markdown", "Generated crate is required.");
       const exportPath = optionalFormValue(form, "exportPath");
       const saved = saveContextPack({ title, markdown, exportPath }, runtime);
       return htmlResponse(
         renderMemoryPackPage(runtime, {
           selectedSavedContextPackId: saved.id,
-          notice: { kind: "success", message: `Saved context pack "${saved.title}".` }
+          notice: { kind: "success", message: `Saved crate "${saved.title}".` }
         })
       );
     }
@@ -636,7 +645,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ContextCrate</title>
+  <title>ContextCrate - Capture</title>
   <style>
     :root {
       color-scheme: light;
@@ -1035,18 +1044,19 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
   <main class="app-shell">
     <header class="app-header">
       <div>
-        <h1>ContextCrate</h1>
+        <h1>Capture</h1>
       </div>
       <nav class="top-actions" aria-label="App actions">
+        <a href="/">Crates</a>
         <a href="/sources">Sources</a>
         <a href="/memories">Manage context</a>
-        <a href="/memory-pack">LLM context pack</a>
         <a href="#review-drafts">Review context${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
         <a href="#add-memory">Add context</a>
       </nav>
     </header>
 
-    <p class="mode-label" aria-label="Conversation mode">Mode: ${escapeHtml(model.modeLabel)}</p>
+    <p class="mode-label" aria-label="Conversation mode">Capture chat · Mode: ${escapeHtml(model.modeLabel)}</p>
+    <p class="mode-label">Chat can help capture possible context for review. Nothing becomes approved context until you approve it.</p>
 
     ${state.notice ? renderNotice(state.notice) : ""}
 
@@ -1343,7 +1353,7 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
         <h1>System</h1>
         <p class="hint">Diagnostics and advanced local tools.</p>
       </div>
-      <a class="back-link" href="/">Back to chat</a>
+      <a class="back-link" href="/">Back to crates</a>
     </header>
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
@@ -1477,7 +1487,7 @@ function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderSt
         <h1>Manage context</h1>
         <p class="hint">Edit or retire the context you have approved. Your approved context stays local and explicit.</p>
       </div>
-      <a class="back-link" href="/">Back to chat</a>
+      <a class="back-link" href="/">Back to crates</a>
     </header>
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
@@ -1540,7 +1550,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ContextCrate - LLM context pack</title>
+  <title>ContextCrate - Crates</title>
   <style>
     :root {
       color-scheme: light;
@@ -1619,31 +1629,39 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
   <div class="wrap">
     <header>
       <div>
-        <h1>LLM context pack</h1>
-        <p class="hint">Create a copy-paste-ready context pack from selected approved context.</p>
+        <h1>Context crates</h1>
+        <p class="hint">A crate is a saved Markdown context pack you can copy or download for an LLM.</p>
       </div>
-      <a class="back-link" href="/">Back to chat</a>
+      <nav class="actions" aria-label="App actions">
+        <a class="link-button" href="/">Crates</a>
+        <a class="link-button" href="/sources">Sources</a>
+        <a class="link-button" href="/memories">Manage context</a>
+        <a class="link-button" href="/capture#review-drafts">Review context${
+          model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""
+        }</a>
+        <a class="link-button" href="/capture">Capture</a>
+      </nav>
     </header>
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
       ${
         state.exportPath && state.memoryPackMarkdown
           ? `<section>
-        <h2>Generated context pack</h2>
+        <h2>Generated crate</h2>
         <p class="hint">Copy this Markdown into Codex, Claude, ChatGPT, Gemini, or another LLM.</p>
         <div class="actions" style="margin-top: 12px;">
-          <button type="button" id="copy-context-pack" data-copy-target="generated-context-pack">Copy context pack</button>
+          <button type="button" id="copy-context-pack" data-copy-target="generated-context-pack">Copy crate</button>
           ${downloadHref ? `<a class="link-button" href="${escapeAttribute(downloadHref)}">Download Markdown</a>` : ""}
           <form method="post" action="/memory-pack/save">
-            <input type="hidden" name="title" value="${escapeAttribute(state.memoryPackTitle ?? "LLM context pack")}">
+            <input type="hidden" name="title" value="${escapeAttribute(state.memoryPackTitle ?? "Context crate")}">
             <input type="hidden" name="exportPath" value="${escapeAttribute(state.exportPath)}">
             <textarea class="hidden-field" name="markdown">${escapeHtml(state.memoryPackMarkdown)}</textarea>
-            <button class="secondary" type="submit">Save context pack</button>
+            <button class="secondary" type="submit">Save crate</button>
           </form>
         </div>
         <p class="notice info" style="margin-top: 12px;">Local export path: ${escapeHtml(state.exportPath)}</p>
         <label style="margin-top: 14px;">
-          Generated context pack
+          Generated crate
           <textarea class="preview" id="generated-context-pack" readonly>${escapeHtml(state.memoryPackMarkdown)}</textarea>
         </label>
       </section>`
@@ -1651,8 +1669,8 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       }
 
       <section>
-        <h2>Saved context packs</h2>
-        <p class="hint">Saved context packs are reusable Markdown export snapshots. Saving one does not create approved context or approve pending suggestions.</p>
+        <h2>Saved crates</h2>
+        <p class="hint">Saved crates are reusable Markdown export snapshots (context packs). Saving one does not create approved context or approve pending suggestions.</p>
         ${
           selectedSavedPack
             ? `<div style="margin-top: 14px;">
@@ -1681,8 +1699,8 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       </section>
 
       <section>
-        <h2>Build context pack</h2>
-        <p class="hint">Only active approved context is available here. The export stays under .hermes/export and does not connect to coding assistants or external services.</p>
+        <h2>Create crate</h2>
+        <p class="hint">Only active approved context is available here. The crate stays under .hermes/export and does not connect to coding assistants or external services.</p>
         <form class="stack" method="post" action="/memory-pack/export" style="margin-top: 14px;">
           <label>
             Project name
@@ -1710,11 +1728,14 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
             </div>
           </div>
           <div class="actions">
-            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Generate LLM context pack</button>
+            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Create crate</button>
           </div>
         </form>
       </section>
     </main>
+    <footer style="margin-top: 24px; text-align: center;">
+      <a class="hint" href="/system" style="text-decoration: none;">Diagnostics</a>
+    </footer>
   </div>
   <script>
     (function () {
@@ -1746,11 +1767,11 @@ function renderSavedContextPackCopyArea(pack: SavedContextPack): string {
     <p class="item-title">${escapeHtml(pack.title)}</p>
     <p class="meta">Saved: ${escapeHtml(pack.created_at)}${pack.filename ? ` · File: ${escapeHtml(pack.filename)}` : ""}</p>
     <div class="actions" style="margin-top: 10px;">
-      <button type="button" id="copy-saved-context-pack" data-copy-target="${textareaId}">Copy context pack</button>
+      <button type="button" id="copy-saved-context-pack" data-copy-target="${textareaId}">Copy crate</button>
       <a class="link-button" href="/memory-pack/saved/download?id=${pack.id}">Download Markdown</a>
     </div>
     <label style="margin-top: 14px;">
-      Generated context pack
+      Generated crate
       <textarea class="preview" id="${textareaId}" readonly>${escapeHtml(pack.markdown)}</textarea>
     </label>
   </article>`;
@@ -1758,7 +1779,7 @@ function renderSavedContextPackCopyArea(pack: SavedContextPack): string {
 
 function renderSavedContextPackList(packs: SavedContextPack[]): string {
   if (packs.length === 0) {
-    return `<p class="empty">No saved context packs yet.</p>`;
+    return `<p class="empty">No saved crates yet.</p>`;
   }
 
   return packs
@@ -1767,7 +1788,7 @@ function renderSavedContextPackList(packs: SavedContextPack[]): string {
       <p class="item-title">${escapeHtml(pack.title)}</p>
       <p class="meta">Saved: ${escapeHtml(pack.created_at)}${pack.filename ? ` · File: ${escapeHtml(pack.filename)}` : ""}</p>
       <div class="actions" style="margin-top: 10px;">
-        <a class="link-button" href="/memory-pack?savedPack=${pack.id}">View saved pack</a>
+        <a class="link-button" href="/?savedPack=${pack.id}">View crate</a>
         <a class="link-button" href="/memory-pack/saved/download?id=${pack.id}">Download Markdown</a>
       </div>
     </article>`
@@ -1884,7 +1905,7 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
         <h1>Sources</h1>
         <p class="hint">Imported documents you can search and turn into context suggestions. Sources are not approved context.</p>
       </div>
-      <a class="back-link" href="/">Back to chat</a>
+      <a class="back-link" href="/">Back to crates</a>
     </header>
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
@@ -2311,7 +2332,7 @@ function renderLongMemoryChoice(text: string): string {
         </form>
       </div>
       <p class="hint">Anything saved as context still waits for your approval before it becomes part of your approved context.</p>
-      <a class="link-button" href="/">Back to chat</a>
+      <a class="link-button" href="/capture">Back to capture</a>
     </div>
   </section>`;
 }

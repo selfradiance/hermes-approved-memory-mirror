@@ -8,6 +8,15 @@ Obsidian or other notes can remain your broad memory / second-brain layer. Conte
 
 ContextCrate stores only context you approve. Chat and sources can suggest context and save it for review, but a suggestion saved for review is not approved context until you approve it. The CLI remains available for advanced use under the existing `hermes` command.
 
+The product is organized around four nouns:
+
+- **Sources** are raw imported material (pasted or file-imported Markdown/text). Importing a source never creates approved context.
+- **Approved context** is durable context you have explicitly approved. It is the only thing used for chat, search, reflection, and crate generation.
+- **Crates** are saved Markdown context-pack snapshots generated from selected approved context, for copy/paste handoff to an external LLM. A crate is an export artifact, not approved context.
+- **Capture chat** is an optional secondary surface that can suggest possible context for review. Nothing it suggests becomes approved context until you approve it.
+
+The default home page is **Crates**. External LLMs are used by copying or downloading a crate out of ContextCrate; the app itself never calls a model except the optional Claude API for chat/suggestion wording.
+
 ## Conversation Modes
 
 ContextCrate has two chat modes, selected by environment variables only. The minimal chat screen shows a subtle label: **Mode: Local** or **Mode: Claude**.
@@ -66,9 +75,9 @@ After building:
 node dist/cli.js doctor
 ```
 
-## Local Web Chat UI
+## Local Web UI
 
-To use ContextCrate conversationally in a browser:
+To use ContextCrate in a browser:
 
 ```bash
 ./scripts/start-local-ui.sh
@@ -95,18 +104,14 @@ npm run ui
 
 The Local Web Chat UI is local-only and binds to loopback, not `0.0.0.0`. It rejects non-local/cross-site POST requests. It adds no connectors, accounts, telemetry, cloud sync, or autonomous actions. A subtle "Mode:" label shows whether chat is running in Local or Claude mode. The only optional outbound call is the configured Claude API model endpoint, and only when you opt in.
 
-In the UI:
+The default page is **Crates** (served at `/`). From the main navigation you can reach Crates, Sources, Manage context, Review context, and Capture.
 
-1. Chat with ContextCrate in the browser.
-2. See its responses, approved context used, and relevant source excerpts.
-3. Let it suggest context when something in chat seems useful for future LLM handoffs.
-4. Edit, save for review, or dismiss a context suggestion.
-5. Save the latest exchange for review.
-6. Review context suggestions, then approve context or dismiss it.
-7. Add context and save it for review.
-8. Open **Manage context** (link in the top navigation, page at `/memories`) to search, edit, or retire your approved context, and to inspect retired/superseded items.
-9. Open **LLM context pack** (link in the top navigation, page at `/memory-pack`) to generate selected active approved context as a Markdown pack, copy it from the browser, or download the Markdown.
-10. Open `Diagnostics` (small footer link to `/system`) only when you want setup diagnostics, deterministic reflection, or local JSON export.
+1. On the **Crates** home page, select active approved context, enter a title, and **Create crate** to generate a Markdown context pack. **Copy crate**, **Download Markdown**, or **Save crate** to keep a reusable snapshot under **Saved crates**.
+2. Open **Capture** (page at `/capture`) to chat with ContextCrate, see its responses, approved context used, and relevant source excerpts, and let it suggest possible context for review. Edit, save for review, or dismiss a suggestion; save the latest exchange for review.
+3. Open **Review context** to review context suggestions, then approve context or dismiss it.
+4. Open **Sources** to import or paste raw Markdown/text and suggest context from a source.
+5. Open **Manage context** (page at `/memories`) to search, edit, or retire your approved context, and to inspect retired/superseded items.
+6. Open `Diagnostics` (small footer link to `/system`) only when you want setup diagnostics, deterministic reflection, or local JSON export.
 
 Only approved context is used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve context.
 
@@ -151,15 +156,15 @@ chat message -> context suggestion -> save for review -> approve context -> appr
 
 In local deterministic mode the detector is local and rule-based. In optional Claude API mode the model may also propose a suggestion. In both modes a suggestion is only saved for review on your action, never browsed for, and never turned into approved context without explicit approval.
 
-## LLM Context Pack Export
+## Crates (LLM Context Pack Export)
 
-LLM Context Pack Export creates a clean Markdown context pack from selected active approved context. It is designed for Claude Code, Codex, ChatGPT, Claude, Gemini, and similar tools: copy/paste durable project context into a current work order without giving an assistant access to the local store.
+A crate is a reusable Markdown context pack for an LLM, generated from selected active approved context. It is designed for Claude Code, Codex, ChatGPT, Claude, Gemini, and similar tools: copy/paste durable project context into a current work order without giving an assistant access to the local store.
 
-In the UI, open **LLM context pack** at `/memory-pack`, search approved context, select the context to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. Generating the pack renders the full Markdown directly on the page with **Copy context pack** as the primary action, while **Download Markdown** and the local file under `.hermes/export/` remain secondary. You can also **Save context pack** to keep a reusable Markdown export snapshot in ContextCrate for later viewing, copying, or downloading.
+The **Crates** page is the default home at `/`. Search approved context, select the context to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. **Create crate** renders the full Markdown directly on the page with **Copy crate** as the primary action, while **Download Markdown** and the local file under `.hermes/export/` remain secondary. You can also **Save crate** to keep a reusable Markdown export snapshot in ContextCrate, listed under **Saved crates** for later viewing, copying, or downloading.
 
-The pack includes the generated timestamp, a note that it came from human-approved context, project title, optional next-step and settled-decisions sections, selected approved context grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the pack is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
+The crate includes the generated timestamp, a note that it came from human-approved context, project title, optional next-step and settled-decisions sections, selected approved context grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the crate is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
 
-This feature does not connect to agents, MCP, GitHub, editors, shells, accounts, or external services. It does not write into any repo. It exports active approved context only and grants no action authority. Saved context packs are export artifacts, not approved context. The approval invariant is unchanged: only explicit human approval creates approved context.
+This feature does not connect to agents, MCP, GitHub, editors, shells, accounts, or external services. It does not write into any repo. It exports active approved context only and grants no action authority. Saved crates are export artifacts, not approved context. The approval invariant is unchanged: only explicit human approval creates approved context.
 
 ## Sources (Markdown / Text Import)
 
@@ -170,7 +175,7 @@ As of v0.4.0 you can import local documents into a **source library**. A source 
 - Sources stay local. The file you choose is read in your browser and its text is stored in the same local SQLite database under `.hermes/`. You can also paste Markdown/text directly into the Sources page. The app never reads arbitrary filesystem paths — only the file you explicitly select or the text you paste.
 - Imported text is split into ordered **excerpts** (chunks) so it can be searched and shown in readable pieces.
 
-In the `Sources` page (linked from the chat header) you can:
+In the `Sources` page (linked from the main navigation) you can:
 
 1. Import a Markdown or text file, or paste Markdown/text directly.
 2. See your sources with title, filename, import date, and excerpt count.

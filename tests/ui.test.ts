@@ -75,16 +75,16 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("<h1>ContextCrate</h1>");
-    expect(html).toContain("Just start chatting. ContextCrate will suggest context when something seems worth saving.");
+    expect(html).toContain("<h1>Context crates</h1>");
+    expect(html).toContain("A crate is a saved Markdown context pack you can copy or download for an LLM.");
     expect(html).not.toContain("HERmes");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
   });
 
-  it("uses human-facing context language on the default chat page", async () => {
+  it("uses human-facing context language on the capture page", async () => {
     const root = makeProject();
 
-    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const response = await handleUiRequest(getRequest("/capture"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
@@ -95,10 +95,10 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("Review drafts");
   });
 
-  it("keeps the default chat surface minimal and free of removed copy", async () => {
+  it("keeps the capture surface minimal and free of removed copy", async () => {
     const root = makeProject();
 
-    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const response = await handleUiRequest(getRequest("/capture"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
@@ -139,7 +139,7 @@ describe("HERmes Local Web Chat UI", () => {
   it("includes an Enter-to-send keydown handler that respects Shift+Enter and empty input", async () => {
     const root = makeProject();
 
-    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const response = await handleUiRequest(getRequest("/capture"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
@@ -152,7 +152,7 @@ describe("HERmes Local Web Chat UI", () => {
   it("shows the conversation mode label and hides the prominent System button", async () => {
     const root = makeProject();
 
-    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const response = await handleUiRequest(getRequest("/capture"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
@@ -356,15 +356,39 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain('href="/memories"');
   });
 
-  it("shows a visible LLM context pack entry point in the main page navigation", async () => {
+  it("makes Crates the primary home page with create and saved crate flows", async () => {
     const root = makeProject();
 
     const response = await handleUiRequest(getRequest("/"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("LLM context pack");
-    expect(html).toContain('href="/memory-pack"');
+    expect(html).toContain("<h1>Context crates</h1>");
+    expect(html).toContain("A crate is a saved Markdown context pack you can copy or download for an LLM.");
+    expect(html).toContain("Create crate");
+    expect(html).toContain("Saved crates");
+    expect(html).toContain('action="/memory-pack/export"');
+  });
+
+  it("includes a Capture link in the main navigation", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('href="/capture"');
+  });
+
+  it("keeps chat input and history on the capture page", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(getRequest("/capture"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('textarea[name="message"]');
+    expect(html).toContain('action="/chat/send"');
   });
 
   it("manage memories page renders active approved memories with edit and retire controls", async () => {
@@ -392,7 +416,7 @@ describe("HERmes Local Web Chat UI", () => {
     delete process.env.HERMES_CHAT_PROVIDER;
     delete process.env.ANTHROPIC_API_KEY;
     try {
-      const home = await handleUiRequest(getRequest("/"), runtime(root));
+      const home = await handleUiRequest(getRequest("/capture"), runtime(root));
       const manage = await handleUiRequest(getRequest("/memories"), runtime(root));
 
       expect(home.status).toBe(200);
@@ -442,7 +466,7 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("<h1>LLM context pack</h1>");
+    expect(html).toContain("<h1>Context crates</h1>");
     expect(html).toContain("Approved memory pack UI memory.");
     expect(html).not.toContain("Retired memory pack UI memory.");
     expect(html).toContain('type="checkbox" name="memoryId"');
@@ -490,13 +514,13 @@ describe("HERmes Local Web Chat UI", () => {
     const markdown = fs.readFileSync(path.join(exportDir, files[0] ?? ""), "utf8");
 
     expect(response.status).toBe(200);
-    expect(html).toContain("LLM context pack exported locally.");
+    expect(html).toContain("Crate generated. Copy, download, or save it below.");
     expect(html).toContain("Local export path:");
-    expect(html).toContain("Generated context pack");
-    expect(html).toContain("Copy context pack");
+    expect(html).toContain("Generated crate");
+    expect(html).toContain("Copy crate");
     expect(html).toContain("Download Markdown");
-    expect(html).toContain("Save context pack");
-    expect(html).toContain("Saved context packs");
+    expect(html).toContain("Save crate");
+    expect(html).toContain("Saved crates");
     expect(html).toContain('action="/memory-pack/save"');
     expect(html).toContain('id="copy-context-pack"');
     expect(html).toContain('id="generated-context-pack"');
@@ -541,10 +565,10 @@ describe("HERmes Local Web Chat UI", () => {
     expect(save.status).toBe(200);
     expect(saved?.title).toBe("Saved UI pack");
     expect(saved?.markdown).toBe(markdown);
-    expect(saveHtml).toContain("Saved context packs");
-    expect(saveHtml).toContain("Saved context pack &quot;Saved UI pack&quot;.");
+    expect(saveHtml).toContain("Saved crates");
+    expect(saveHtml).toContain("Saved crate &quot;Saved UI pack&quot;.");
     expect(saveHtml).toContain('id="copy-saved-context-pack"');
-    expect(saveHtml).toContain("Copy context pack");
+    expect(saveHtml).toContain("Copy crate");
     expect(saveHtml).toContain("Download Markdown");
     expect(saveHtml).toContain(markdown);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
@@ -553,7 +577,7 @@ describe("HERmes Local Web Chat UI", () => {
     const view = await handleUiRequest(getRequest(`/memory-pack?savedPack=${saved!.id}`), runtime(root));
     const viewHtml = await view.text();
     expect(view.status).toBe(200);
-    expect(viewHtml).toContain("Generated context pack");
+    expect(viewHtml).toContain("Generated crate");
     expect(viewHtml).toContain(markdown);
     expect(viewHtml).toContain("navigator.clipboard.writeText");
 
@@ -751,7 +775,7 @@ describe("HERmes Local Web Chat UI", () => {
     const [session] = listChatSessions(runtime(root));
     const [userMessage] = listChatMessages(session.id, runtime(root));
 
-    const page = await handleUiRequest(getRequest("/"), runtime(root));
+    const page = await handleUiRequest(getRequest("/capture"), runtime(root));
     const html = await page.text();
     const suggestionKey = html.match(/name="suggestionKey" value="([^"]+)"/)?.[1];
     expect(suggestionKey).toBeDefined();
@@ -787,7 +811,7 @@ describe("HERmes Local Web Chat UI", () => {
     );
     const [session] = listChatSessions(runtime(root));
     const [userMessage] = listChatMessages(session.id, runtime(root));
-    const page = await handleUiRequest(getRequest("/"), runtime(root));
+    const page = await handleUiRequest(getRequest("/capture"), runtime(root));
     const html = await page.text();
     const suggestionKey = html.match(/name="suggestionKey" value="([^"]+)"/)?.[1];
     expect(suggestionKey).toBeDefined();
