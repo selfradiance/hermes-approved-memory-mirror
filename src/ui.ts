@@ -17,6 +17,7 @@ import {
 import {
   approveDraft,
   createDraftFromText,
+  deleteContextPack,
   doctor,
   editApprovedMemory,
   ensureHermesInitialized,
@@ -92,9 +93,12 @@ interface RenderState {
   showRetiredMemories?: boolean;
   memoryPackMarkdown?: string;
   memoryPackSelectedIds?: number[];
+  memoryPackSelectedSourceIds?: number[];
   memoryPackTitle?: string;
+  memoryPackCratePurpose?: string;
   memoryPackCurrentNextStep?: string;
   memoryPackSettledDecisions?: string;
+  memoryPackExtraNotes?: string;
   selectedSavedContextPackId?: number;
 }
 
@@ -291,15 +295,21 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/memory-pack/export") {
       const form = await readForm(request);
       const title = requiredFormValue(form, "title", "Project title is required.");
+      const cratePurpose = optionalFormValue(form, "cratePurpose");
       const currentNextStep = optionalFormValue(form, "currentNextStep");
       const settledDecisions = optionalFormValue(form, "settledDecisions");
+      const extraNotes = optionalFormValue(form, "extraNotes");
       const memoryIds = form.getAll("memoryId").map((value) => parsePositiveInteger(value, "Context id"));
+      const sourceIds = form.getAll("sourceId").map((value) => parsePositiveInteger(value, "Source id"));
       const result = exportProjectMemoryPack(
         {
           title,
+          cratePurpose,
           currentNextStep,
           settledDecisions,
-          memoryIds
+          extraNotes,
+          memoryIds,
+          sourceIds
         },
         runtime
       );
@@ -309,9 +319,12 @@ export async function handleUiRequest(
           exportPath: result.exportPath,
           memoryPackMarkdown: result.markdown,
           memoryPackSelectedIds: result.memoryIds,
+          memoryPackSelectedSourceIds: sourceIds,
           memoryPackTitle: title,
+          memoryPackCratePurpose: cratePurpose,
           memoryPackCurrentNextStep: currentNextStep,
-          memoryPackSettledDecisions: settledDecisions
+          memoryPackSettledDecisions: settledDecisions,
+          memoryPackExtraNotes: extraNotes
         })
       );
     }
@@ -326,6 +339,20 @@ export async function handleUiRequest(
         renderMemoryPackPage(runtime, {
           selectedSavedContextPackId: saved.id,
           notice: { kind: "success", message: `Saved crate "${saved.title}".` }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/memory-pack/delete") {
+      const form = await readForm(request);
+      const packId = parsePositiveInteger(requiredFormValue(form, "id", "Saved crate id is required."), "Saved crate id");
+      deleteContextPack(packId, runtime);
+      return htmlResponse(
+        renderMemoryPackPage(runtime, {
+          notice: {
+            kind: "success",
+            message: "Deleted the saved crate. Approved context and sources were not changed."
+          }
         })
       );
     }
@@ -1536,6 +1563,8 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     ? (model.searchResults ?? []).map(({ memory }) => memory)
     : model.approvedMemories;
   const selectedIds = state.memoryPackSelectedIds ?? [];
+  const sources = model.canReadMemory ? listSources(runtime) : [];
+  const selectedSourceIds = state.memoryPackSelectedSourceIds ?? [];
   const selectedSavedPack =
     state.selectedSavedContextPackId !== undefined
       ? getSavedContextPack(state.selectedSavedContextPackId, runtime)
@@ -1700,7 +1729,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
 
       <section>
         <h2>Create crate</h2>
-        <p class="hint">Only active approved context is available here. The crate stays under .hermes/export and does not connect to coding assistants or external services.</p>
+        <p class="hint">Assemble a crate from approved context, selected sources, and one-off crate notes. The crate stays under .hermes/export and does not connect to coding assistants or external services.</p>
         <form class="stack" method="post" action="/memory-pack/export" style="margin-top: 14px;">
           <label>
             Project name
@@ -1709,15 +1738,23 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
             )}" placeholder="Project or work order name">
           </label>
           <label>
-            Current next step (optional)
-            <textarea name="currentNextStep" placeholder="What should the coding assistant focus on next?">${escapeHtml(
+            Crate purpose (optional)
+            <span class="hint">Optional. Example: “Context for the next Claude Code implementation pass.”</span>
+            <input type="text" name="cratePurpose" value="${escapeAttribute(
+              state.memoryPackCratePurpose ?? ""
+            )}" placeholder="Why this crate exists">
+          </label>
+          <label>
+            Task for the LLM (optional)
+            <span class="hint">Optional. Tell the LLM what you want it to do after reading this crate. Example: “Update the ContextCrate UI so sources can be selected into crates.”</span>
+            <textarea name="currentNextStep" placeholder="What should the LLM do after reading this crate?">${escapeHtml(
               state.memoryPackCurrentNextStep ?? ""
             )}</textarea>
           </label>
           <label>
-            Settled decisions / things not to reopen (optional)
-            <span class="hint">Add decisions that are already settled, so a coding assistant does not waste time suggesting them again.</span>
-            <textarea name="settledDecisions" placeholder="Settled decisions">${escapeHtml(
+            Settled decisions / constraints (optional)
+            <span class="hint">Optional. Add decisions or boundaries the LLM should follow. Example: “Do not add PDF import yet. Keep internals stable. Do not rename the CLI.”</span>
+            <textarea name="settledDecisions" placeholder="Settled decisions or constraints">${escapeHtml(
               state.memoryPackSettledDecisions ?? ""
             )}</textarea>
           </label>
@@ -1727,8 +1764,22 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
               ${renderMemoryPackChoices(matchingMemories, selectedIds, model.searchQuery)}
             </div>
           </div>
+          <div>
+            <p class="item-title">Include sources (optional)</p>
+            <span class="hint">Sources are raw material. Including a source adds its text to the crate; it does not make the source approved context.</span>
+            <div class="memory-choice-list" style="margin-top: 10px;">
+              ${renderCratePackSourceChoices(sources, selectedSourceIds)}
+            </div>
+          </div>
+          <label>
+            Paste extra Markdown/text for this crate
+            <span class="hint">Optional. This text is included only in the generated crate. It is not saved as approved context or imported as a source.</span>
+            <textarea name="extraNotes" placeholder="Extra Markdown or text for this crate only">${escapeHtml(
+              state.memoryPackExtraNotes ?? ""
+            )}</textarea>
+          </label>
           <div class="actions">
-            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Create crate</button>
+            <button type="submit"${matchingMemories.length === 0 && sources.length === 0 ? " disabled" : ""}>Create crate</button>
           </div>
         </form>
       </section>
@@ -1769,7 +1820,12 @@ function renderSavedContextPackCopyArea(pack: SavedContextPack): string {
     <div class="actions" style="margin-top: 10px;">
       <button type="button" id="copy-saved-context-pack" data-copy-target="${textareaId}">Copy crate</button>
       <a class="link-button" href="/memory-pack/saved/download?id=${pack.id}">Download Markdown</a>
+      <form method="post" action="/memory-pack/delete" style="display: inline; margin: 0;">
+        <input type="hidden" name="id" value="${pack.id}">
+        <button type="submit" style="background: var(--danger);">Delete crate</button>
+      </form>
     </div>
+    <p class="meta" style="margin-top: 6px;">This deletes the saved crate only. It does not delete approved context or sources.</p>
     <label style="margin-top: 14px;">
       Generated crate
       <textarea class="preview" id="${textareaId}" readonly>${escapeHtml(pack.markdown)}</textarea>
@@ -1790,7 +1846,12 @@ function renderSavedContextPackList(packs: SavedContextPack[]): string {
       <div class="actions" style="margin-top: 10px;">
         <a class="link-button" href="/?savedPack=${pack.id}">View crate</a>
         <a class="link-button" href="/memory-pack/saved/download?id=${pack.id}">Download Markdown</a>
+        <form method="post" action="/memory-pack/delete" style="display: inline; margin: 0;">
+          <input type="hidden" name="id" value="${pack.id}">
+          <button type="submit" style="background: var(--danger);">Delete crate</button>
+        </form>
       </div>
+      <p class="meta" style="margin-top: 6px;">This deletes the saved crate only. It does not delete approved context or sources.</p>
     </article>`
     )
     .join("");
@@ -2412,6 +2473,32 @@ function renderMemoryPackChoices(memories: MemoryEntry[], selectedIds: number[],
             formatTags(memory.tags_json)
           )}</span>
           <span class="content">${escapeHtml(compactText(memory.content, 320))}</span>
+        </span>
+      </label>`;
+    })
+    .join("");
+}
+
+function renderCratePackSourceChoices(sources: SourceSummary[], selectedSourceIds: number[]): string {
+  if (sources.length === 0) {
+    return `<p class="empty">No sources imported yet. Import Markdown or text on the Sources page to include it here.</p>`;
+  }
+
+  return sources
+    .map((source) => {
+      const checked = selectedSourceIds.includes(source.id) ? " checked" : "";
+      const meta = [
+        source.original_filename ? `File: ${escapeHtml(source.original_filename)}` : "",
+        `Imported: ${escapeHtml(source.imported_at)}`,
+        `${source.chunk_count} excerpt${source.chunk_count === 1 ? "" : "s"}`
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<label class="memory-choice">
+        <input type="checkbox" name="sourceId" value="${source.id}"${checked}>
+        <span>
+          <span class="item-title">${escapeHtml(source.title)}</span>
+          <span class="meta">${meta}</span>
         </span>
       </label>`;
     })

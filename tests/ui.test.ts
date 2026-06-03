@@ -471,9 +471,10 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("Retired memory pack UI memory.");
     expect(html).toContain('type="checkbox" name="memoryId"');
     expect(html).toContain('action="/memory-pack/export"');
-    expect(html).toContain("Settled decisions / things not to reopen");
+    expect(html).toContain("Task for the LLM");
+    expect(html).toContain("Settled decisions / constraints");
     expect(html).toContain(
-      "Add decisions that are already settled, so a coding assistant does not waste time suggesting them again."
+      "Add decisions or boundaries the LLM should follow."
     );
   });
 
@@ -530,7 +531,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^project-context-pack-\d{8}-\d{6}\.md$/);
     expect(markdown).toContain("# Project Context Pack: HERmes export test");
-    expect(markdown).toContain("## Settled decisions / things not to reopen");
+    expect(markdown).toContain("## Settled decisions / constraints");
     expect(markdown).toContain(`#### Context ${memory.id}`);
     expect(markdown).toContain("Coding agents should receive approved context only.");
     expect(markdown).toContain(
@@ -588,6 +589,121 @@ describe("HERmes Local Web Chat UI", () => {
     expect(download.status).toBe(200);
     expect(download.headers.get("content-disposition") ?? "").toContain('filename="saved-ui-pack.md"');
     expect(await download.text()).toBe(`${markdown}\n`);
+  });
+
+  it("crate page shows a Delete crate control for each saved crate", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Deletable crate",
+        markdown: "# Project Context Pack: Deletable crate\n\nSnapshot.",
+        exportPath: path.join(root, ".hermes", "export", "deletable.md")
+      }),
+      runtime(root)
+    );
+
+    const response = await handleUiRequest(getRequest("/memory-pack"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Delete crate");
+    expect(html).toContain('action="/memory-pack/delete"');
+    expect(html).toContain("This deletes the saved crate only. It does not delete approved context or sources.");
+  });
+
+  it("deleting a saved crate removes only the crate, not approved context or sources", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Approved context that must survive crate deletion.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+    await handleUiRequest(formRequest("/drafts/long/import", { text: longAddMemoryText() }), runtime(root));
+    const [source] = listSources(runtime(root));
+
+    await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Crate to delete",
+        markdown: "# Project Context Pack: Crate to delete\n\nSnapshot.",
+        exportPath: path.join(root, ".hermes", "export", "crate-to-delete.md")
+      }),
+      runtime(root)
+    );
+    const [saved] = listSavedContextPacks(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/memory-pack/delete", { id: String(saved!.id) }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Deleted the saved crate. Approved context and sources were not changed.");
+    expect(listSavedContextPacks(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root)).some((item) => item.id === memory.id)).toBe(true);
+    expect(listSources(runtime(root)).some((item) => item.id === source!.id)).toBe(true);
+  });
+
+  it("crate builder lists imported sources as selectable", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(formRequest("/drafts/long/import", { text: longAddMemoryText() }), runtime(root));
+
+    const response = await handleUiRequest(getRequest("/memory-pack"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('type="checkbox" name="sourceId"');
+    expect(html).toContain("Source review workflow");
+  });
+
+  it("generated crate includes selected source content without creating approved context", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(formRequest("/drafts/long/import", { text: longAddMemoryText() }), runtime(root));
+    const [source] = listSources(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/memory-pack/export", {
+        title: "Source crate",
+        sourceId: String(source!.id)
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const exportDir = path.join(root, ".hermes", "export");
+    const files = fs.readdirSync(exportDir).filter((file) => file.endsWith(".md"));
+    const markdown = fs.readFileSync(path.join(exportDir, files[0] ?? ""), "utf8");
+
+    expect(response.status).toBe(200);
+    expect(markdown).toContain("## Included sources");
+    expect(markdown).toContain("Source review workflow");
+    expect(markdown).toContain("Raw material: included as reference, not approved context.");
+    expect(html).toContain("Crate generated. Copy, download, or save it below.");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+  });
+
+  it("generated crate includes pasted extra Markdown without creating source or context", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(
+      formRequest("/memory-pack/export", {
+        title: "Notes crate",
+        extraNotes: "## One-off crate note\n\nThis text lives only in the crate."
+      }),
+      runtime(root)
+    );
+    const exportDir = path.join(root, ".hermes", "export");
+    const files = fs.readdirSync(exportDir).filter((file) => file.endsWith(".md"));
+    const markdown = fs.readFileSync(path.join(exportDir, files[0] ?? ""), "utf8");
+
+    expect(response.status).toBe(200);
+    expect(markdown).toContain("## Extra crate notes");
+    expect(markdown).toContain("This text lives only in the crate.");
+    expect(listSources(runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
   });
 
   it("editing an approved memory through the UI creates an active replacement", async () => {

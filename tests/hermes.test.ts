@@ -241,7 +241,7 @@ describe("HERmes v0.1", () => {
     expect(markdown).toContain("Project: HERmes coding context");
     expect(markdown).toContain("Wire the export through the local UI.");
     expect(markdown).toContain("Do not add MCP, connectors, or agent write access.");
-    expect(markdown).toContain("## Settled decisions / things not to reopen");
+    expect(markdown).toContain("## Settled decisions / constraints");
     expect(markdown).toContain(`#### Context ${memory.id}`);
     expect(markdown).toContain(`- Approved context id: ${memory.id}`);
     expect(markdown).toContain("James decided HERmes project exports should stay copy-paste only");

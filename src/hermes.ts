@@ -490,9 +490,12 @@ export function exportApprovedMemories(options: HermesRuntimeOptions = {}): stri
 export function exportProjectMemoryPack(
   input: {
     title: string;
+    cratePurpose?: string;
     currentNextStep?: string;
     settledDecisions?: string;
+    extraNotes?: string;
     memoryIds: number[];
+    sourceIds?: number[];
     outPath?: string;
     generatedAt?: Date;
   },
@@ -504,8 +507,10 @@ export function exportProjectMemoryPack(
   }
 
   const memoryIds = uniquePositiveIds(input.memoryIds);
-  if (memoryIds.length === 0) {
-    throw new Error("Select at least one active approved context item.");
+  const sourceIds = uniquePositiveIds(input.sourceIds ?? []);
+  const extraNotes = normalizeMemoryPackField(input.extraNotes ?? "");
+  if (memoryIds.length === 0 && sourceIds.length === 0 && !extraNotes) {
+    throw new Error("Add approved context, a source, or crate notes to build a crate.");
   }
 
   const generatedDate = input.generatedAt ?? new Date();
@@ -527,12 +532,18 @@ export function exportProjectMemoryPack(
     }
 
     const selected = activeMemories.filter((memory) => memoryIds.includes(memory.id));
+    // Selected sources are raw material assembled directly into the crate.
+    // They are never approved context and create no drafts.
+    const includedSources = loadIncludedCrateSources(db, sourceIds);
     const markdown = buildProjectMemoryPackMarkdown({
       title,
+      cratePurpose: normalizeMemoryPackField(input.cratePurpose ?? ""),
       currentNextStep: normalizeMemoryPackField(input.currentNextStep ?? ""),
       settledDecisions: normalizeMemoryPackField(input.settledDecisions ?? ""),
+      extraNotes,
       generatedAt,
-      memories: selected
+      memories: selected,
+      includedSources
     });
     const exportPath = resolveMemoryPackExportPath(paths, input.outPath, generatedDate);
     fs.mkdirSync(path.dirname(exportPath), { recursive: true });
@@ -543,7 +554,8 @@ export function exportProjectMemoryPack(
       details: {
         exportPath,
         projectTitle: title,
-        memoryIds: selected.map((memory) => memory.id)
+        memoryIds: selected.map((memory) => memory.id),
+        sourceIds: includedSources.map((source) => source.id)
       }
     });
 
@@ -556,6 +568,41 @@ export function exportProjectMemoryPack(
   } finally {
     db.close();
   }
+}
+
+interface IncludedCrateSource {
+  id: number;
+  title: string;
+  filename: string;
+  importedAt: string;
+  sizeBytes: number;
+  content: string;
+}
+
+function loadIncludedCrateSources(db: Database.Database, sourceIds: number[]): IncludedCrateSource[] {
+  const sources: IncludedCrateSource[] = [];
+  for (const sourceId of sourceIds) {
+    const source = db
+      .prepare("SELECT * FROM sources WHERE id = ? AND status = 'active'")
+      .get(sourceId) as
+      | { id: number; title: string; original_filename: string; imported_at: string; size_bytes: number }
+      | undefined;
+    if (!source) {
+      continue;
+    }
+    const chunks = db
+      .prepare("SELECT content FROM source_chunks WHERE source_id = ? ORDER BY chunk_index ASC")
+      .all(sourceId) as Array<{ content: string }>;
+    sources.push({
+      id: source.id,
+      title: source.title,
+      filename: source.original_filename,
+      importedAt: source.imported_at,
+      sizeBytes: source.size_bytes,
+      content: chunks.map((chunk) => chunk.content).join("\n\n").trim()
+    });
+  }
+  return sources;
 }
 
 export function saveContextPack(
@@ -632,6 +679,28 @@ export function getSavedContextPack(
   const db = openExistingDb(options);
   try {
     return db.prepare("SELECT * FROM context_packs WHERE id = ?").get(packId) as SavedContextPack | undefined;
+  } finally {
+    db.close();
+  }
+}
+
+// Deletes only the saved crate snapshot. Approved context, sources, and
+// pending suggestions live in separate tables and are never touched here.
+export function deleteContextPack(packId: number, options: HermesRuntimeOptions = {}): void {
+  if (!Number.isInteger(packId) || packId <= 0) {
+    throw new Error("Saved context pack id must be a positive integer.");
+  }
+  const db = openExistingDb(options);
+  try {
+    const remove = db.transaction(() => {
+      const pack = getSavedContextPackByIdOrThrow(db, packId);
+      db.prepare("DELETE FROM context_packs WHERE id = ?").run(packId);
+      insertEvent(db, {
+        event_type: "context_pack_deleted",
+        details: { contextPackId: packId, title: pack.title }
+      });
+    });
+    remove();
   } finally {
     db.close();
   }
@@ -933,10 +1002,13 @@ type MemoryPackGroup = (typeof MEMORY_PACK_GROUPS)[number];
 
 function buildProjectMemoryPackMarkdown(input: {
   title: string;
+  cratePurpose: string;
   currentNextStep: string;
   settledDecisions: string;
+  extraNotes: string;
   generatedAt: string;
   memories: MemoryEntry[];
+  includedSources: IncludedCrateSource[];
 }): string {
   const grouped = new Map<MemoryPackGroup, MemoryEntry[]>(
     MEMORY_PACK_GROUPS.map((group) => [group, []])
@@ -956,28 +1028,61 @@ function buildProjectMemoryPackMarkdown(input: {
     ""
   ];
 
+  if (input.cratePurpose) {
+    lines.push("## Crate purpose", "", input.cratePurpose, "");
+  }
   if (input.currentNextStep) {
-    lines.push("## Current Next Step", "", input.currentNextStep, "");
+    lines.push("## Task for the LLM", "", input.currentNextStep, "");
   }
   if (input.settledDecisions) {
-    lines.push("## Settled decisions / things not to reopen", "", input.settledDecisions, "");
+    lines.push("## Settled decisions / constraints", "", input.settledDecisions, "");
   }
 
-  lines.push("## Included Approved Context", "");
-  for (const group of MEMORY_PACK_GROUPS) {
-    lines.push(`### ${group}`, "");
-    const memories = grouped.get(group) ?? [];
-    if (memories.length === 0) {
-      lines.push("_No selected context in this group._", "");
-      continue;
-    }
-    for (const memory of memories) {
-      lines.push(...formatMemoryPackMemory(memory), "");
+  if (input.memories.length > 0) {
+    lines.push("## Approved context", "");
+    for (const group of MEMORY_PACK_GROUPS) {
+      const memories = grouped.get(group) ?? [];
+      if (memories.length === 0) {
+        continue;
+      }
+      lines.push(`### ${group}`, "");
+      for (const memory of memories) {
+        lines.push(...formatMemoryPackMemory(memory), "");
+      }
     }
   }
+
+  if (input.includedSources.length > 0) {
+    lines.push("## Included sources", "");
+    for (const source of input.includedSources) {
+      lines.push(...formatIncludedCrateSource(source), "");
+    }
+  }
+
+  if (input.extraNotes) {
+    lines.push("## Extra crate notes", "", input.extraNotes, "");
+  }
+
+  lines.push(
+    "## Notes",
+    "",
+    "- This crate is a Markdown context snapshot.",
+    "- Sources included here are raw material unless separately approved as context inside ContextCrate.",
+    ""
+  );
 
   lines.push("## Boundary", "", MEMORY_PACK_FOOTER);
   return lines.join("\n").trimEnd();
+}
+
+function formatIncludedCrateSource(source: IncludedCrateSource): string[] {
+  const lines = [`### ${source.title}`, ""];
+  if (source.filename) {
+    lines.push(`- Source file: ${source.filename}`);
+  }
+  lines.push("- Raw material: included as reference, not approved context.", "");
+  lines.push(source.content || "_This source has no stored text._");
+  return lines;
 }
 
 function formatMemoryPackMemory(memory: MemoryEntry): string[] {

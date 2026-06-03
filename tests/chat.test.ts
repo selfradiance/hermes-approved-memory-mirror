@@ -84,7 +84,7 @@ describe("HERmes v0.2 chat", () => {
     const exportPath = path.join(root, ".hermes", "export", "cli-pack.md");
     expect(output.join("\n")).toContain(`Export written: ${exportPath}`);
     expect(fs.readFileSync(exportPath, "utf8")).toContain("# Project Context Pack: CLI packet");
-    expect(fs.readFileSync(exportPath, "utf8")).toContain("## Settled decisions / things not to reopen");
+    expect(fs.readFileSync(exportPath, "utf8")).toContain("## Settled decisions / constraints");
     expect(fs.readFileSync(exportPath, "utf8")).toContain("CLI memory pack export should stay");
   });
 
