@@ -468,7 +468,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("Cobalt project memory pack preference.");
   });
 
-  it("memory pack export writes Markdown under .hermes/export and shows a preview", async () => {
+  it("memory pack export writes Markdown under .hermes/export and renders it for copy/paste", async () => {
     const root = makeProject();
     initHermes(runtime(root));
     const [draft] = intakeText("Coding agents should receive approved context only.", runtime(root));
@@ -477,7 +477,7 @@ describe("HERmes Local Web Chat UI", () => {
     const response = await handleUiRequest(
       formRequest("/memory-pack/export", {
         title: "HERmes export test",
-        currentNextStep: "Review the Markdown preview.",
+        currentNextStep: "Review the generated context pack.",
         settledDecisions: "Do not connect to agents.",
         memoryId: String(memory.id)
       }),
@@ -491,7 +491,14 @@ describe("HERmes Local Web Chat UI", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("LLM context pack exported locally.");
     expect(html).toContain("Local export path:");
-    expect(html).toContain("Markdown preview");
+    expect(html).toContain("Generated context pack");
+    expect(html).toContain("Copy context pack");
+    expect(html).toContain("Download Markdown");
+    expect(html).toContain('id="copy-context-pack"');
+    expect(html).toContain('id="generated-context-pack"');
+    expect(html).toContain("navigator.clipboard.writeText");
+    expect(html).toContain("# Project Context Pack: HERmes export test");
+    expect(html).toContain("Coding agents should receive approved context only.");
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^project-context-pack-\d{8}-\d{6}\.md$/);
     expect(markdown).toContain("# Project Context Pack: HERmes export test");
@@ -501,6 +508,14 @@ describe("HERmes Local Web Chat UI", () => {
     expect(markdown).toContain(
       "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order."
     );
+
+    const download = await handleUiRequest(
+      getRequest(`/memory-pack/download?file=${encodeURIComponent(files[0] ?? "")}`),
+      runtime(root)
+    );
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition") ?? "").toContain(`filename="${files[0]}"`);
+    expect(await download.text()).toBe(markdown);
   });
 
   it("editing an approved memory through the UI creates an active replacement", async () => {

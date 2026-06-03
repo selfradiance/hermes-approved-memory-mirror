@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   createChatSession,
@@ -32,14 +34,17 @@ import {
   updateDraftProposedContent
 } from "./hermes.js";
 import {
+  deleteSource,
   getSource,
   getSourceChunks,
   importSource,
   listSources,
+  renameSource,
   retrieveRelevantSourceChunks,
   searchSourceChunks,
   suggestMemoriesFromSource
 } from "./sources.js";
+import { resolveHermesPaths } from "./db.js";
 import { chatModeLabel } from "./llm/chatMode.js";
 import { formatDoctor } from "./format.js";
 import type {
@@ -255,6 +260,10 @@ export async function handleUiRequest(
       const searchQuery = (url.searchParams.get("query") ?? "").trim();
       const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
       return htmlResponse(renderMemoryPackPage(runtime, { searchQuery, searchResults }));
+    }
+
+    if (request.method === "GET" && url.pathname === "/memory-pack/download") {
+      return markdownDownloadResponse(runtime, url.searchParams.get("file") ?? "");
     }
 
     if (request.method === "POST" && url.pathname === "/memory-pack/export") {
@@ -482,6 +491,40 @@ export async function handleUiRequest(
             message: `Imported "${source.title}" as a source with ${source.chunk_count} excerpt${
               source.chunk_count === 1 ? "" : "s"
             }. It is not approved context.`
+          }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/rename") {
+      const form = await readForm(request);
+      const sourceId = parsePositiveInteger(
+        requiredFormValue(form, "sourceId", "Source id is required."),
+        "Source id"
+      );
+      const title = requiredFormValue(form, "title", "Source title is required.");
+      const source = renameSource(sourceId, title, runtime);
+      return htmlResponse(
+        renderSourcesPage(runtime, {
+          selectedSourceId: source.id,
+          notice: { kind: "success", message: `Renamed source "${source.title}".` }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/delete") {
+      const form = await readForm(request);
+      const sourceId = parsePositiveInteger(
+        requiredFormValue(form, "sourceId", "Source id is required."),
+        "Source id"
+      );
+      deleteSource(sourceId, runtime);
+      return htmlResponse(
+        renderSourcesPage(runtime, {
+          notice: {
+            kind: "info",
+            message:
+              "Deleted source. This removed the imported raw source and excerpts. Approved context already created from it will remain."
           }
         })
       );
@@ -1439,6 +1482,10 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     ? (model.searchResults ?? []).map(({ memory }) => memory)
     : model.approvedMemories;
   const selectedIds = state.memoryPackSelectedIds ?? [];
+  const downloadFileName = state.exportPath ? path.basename(state.exportPath) : undefined;
+  const downloadHref = downloadFileName
+    ? `/memory-pack/download?file=${encodeURIComponent(downloadFileName)}`
+    : undefined;
 
   return `<!doctype html>
 <html lang="en">
@@ -1474,11 +1521,11 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     h1 { font-size: 1.55rem; }
     h2 { font-size: 1.08rem; }
     a { color: var(--accent-strong); }
-    .back-link, button {
+    .back-link, .link-button, button {
       display: inline-flex; align-items: center; justify-content: center; min-height: 38px;
       border-radius: 6px; padding: 8px 11px; font: inherit; font-weight: 700;
     }
-    .back-link { border: 1px solid var(--line); background: #fbfcfb; text-decoration: none; }
+    .back-link, .link-button { border: 1px solid var(--line); background: #fbfcfb; text-decoration: none; }
     button { border: 0; color: #fff; background: var(--accent); cursor: pointer; }
     button:disabled { cursor: not-allowed; opacity: 0.55; }
     main, .stack { display: grid; gap: 14px; }
@@ -1513,7 +1560,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     .content { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
     @media (max-width: 760px) {
       header, .search-row { display: grid; grid-template-columns: 1fr; }
-      button, .back-link { width: 100%; }
+      button, .back-link, .link-button { width: 100%; }
     }
   </style>
 </head>
@@ -1531,11 +1578,16 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       ${
         state.exportPath && state.memoryPackMarkdown
           ? `<section>
-        <h2>Export ready</h2>
+        <h2>Generated context pack</h2>
+        <p class="hint">Copy this Markdown into Codex, Claude, ChatGPT, Gemini, or another LLM.</p>
+        <div class="actions" style="margin-top: 12px;">
+          <button type="button" id="copy-context-pack">Copy context pack</button>
+          ${downloadHref ? `<a class="link-button" href="${escapeAttribute(downloadHref)}">Download Markdown</a>` : ""}
+        </div>
         <p class="notice info" style="margin-top: 12px;">Local export path: ${escapeHtml(state.exportPath)}</p>
         <label style="margin-top: 14px;">
-          Markdown preview
-          <textarea class="preview" readonly>${escapeHtml(state.memoryPackMarkdown)}</textarea>
+          Generated context pack
+          <textarea class="preview" id="generated-context-pack" readonly>${escapeHtml(state.memoryPackMarkdown)}</textarea>
         </label>
       </section>`
           : ""
@@ -1584,12 +1636,33 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
             </div>
           </div>
           <div class="actions">
-            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Export Markdown context pack</button>
+            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Generate LLM context pack</button>
           </div>
         </form>
       </section>
     </main>
   </div>
+  ${
+    state.memoryPackMarkdown
+      ? `<script>
+    (function () {
+      var button = document.getElementById("copy-context-pack");
+      var pack = document.getElementById("generated-context-pack");
+      if (!button || !pack) { return; }
+      button.addEventListener("click", async function () {
+        if (!navigator.clipboard) {
+          pack.focus();
+          pack.select();
+          button.textContent = "Select and copy";
+          return;
+        }
+        await navigator.clipboard.writeText(pack.value);
+        button.textContent = "Copied";
+      });
+    })();
+  </script>`
+      : ""
+  }
 </body>
 </html>`;
 }
@@ -1656,6 +1729,7 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     .back-link { border: 1px solid var(--line); background: #fbfcfb; text-decoration: none; }
     button { border: 0; color: #fff; background: var(--accent); cursor: pointer; }
     button.secondary { color: var(--accent-strong); border: 1px solid var(--line); background: #fbfcfb; }
+    button.danger { background: var(--danger); }
     main, .stack { display: grid; gap: 14px; }
     section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
     .hint, .meta, .empty { color: var(--muted); }
@@ -1673,6 +1747,16 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     .suggest-count { max-width: 280px; }
     .suggest-count input[type="number"] { width: 96px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .source-management { display: grid; gap: 10px; margin-top: 12px; }
+    .source-control {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      background: #fbfcfb;
+    }
+    .source-control summary { cursor: pointer; font-weight: 750; color: var(--accent-strong); }
+    .source-control.danger-zone summary { color: var(--danger); }
+    .source-control form { margin-top: 10px; }
     .item { border-top: 1px solid var(--line); padding-top: 14px; }
     .item:first-child { border-top: 0; padding-top: 0; }
     .item-title { margin: 0 0 6px; font-weight: 750; }
@@ -1807,6 +1891,30 @@ function renderSourceList(sources: SourceSummary[]): string {
           </label>
           <button class="secondary" type="submit">Suggest context from this source</button>
         </form>
+      </div>
+      <div class="source-management">
+        <details class="source-control">
+          <summary>Rename source</summary>
+          <form class="stack" method="post" action="/sources/rename">
+            <input type="hidden" name="sourceId" value="${source.id}">
+            <label>
+              Source title
+              <input type="text" name="title" required value="${escapeAttribute(source.title)}">
+            </label>
+            <div class="actions">
+              <button type="submit">Rename source</button>
+            </div>
+          </form>
+        </details>
+        <details class="source-control danger-zone">
+          <summary>Delete source</summary>
+          <p class="item-title" style="margin-top: 10px;">Delete this source?</p>
+          <p class="hint">This removes the imported raw source and excerpts. Approved context already created from it will remain.</p>
+          <form method="post" action="/sources/delete">
+            <input type="hidden" name="sourceId" value="${source.id}">
+            <button class="danger" type="submit">Delete source</button>
+          </form>
+        </details>
       </div>
     </article>`
     )
@@ -2359,6 +2467,31 @@ function htmlResponse(html: string, status = 200): Response {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store"
+    }
+  });
+}
+
+function markdownDownloadResponse(runtime: HermesRuntimeOptions, requestedFile: string): Response {
+  const fileName = requestedFile.trim();
+  if (!/^[A-Za-z0-9._-]+\.md$/.test(fileName)) {
+    throw new Error("Markdown export file is required.");
+  }
+  const paths = resolveHermesPaths(runtime);
+  const exportDir = path.resolve(paths.exportDir);
+  const filePath = path.resolve(exportDir, fileName);
+  if (!filePath.startsWith(`${exportDir}${path.sep}`)) {
+    throw new Error("Markdown export file is required.");
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error("Markdown export file was not found.");
+  }
+  const markdown = fs.readFileSync(filePath, "utf8");
+  return new Response(markdown, {
+    status: 200,
+    headers: {
+      "content-type": "text/markdown; charset=utf-8",
+      "content-disposition": `attachment; filename="${fileName}"`,
       "cache-control": "no-store"
     }
   });

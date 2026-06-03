@@ -4,9 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   chunkContent,
+  deleteSource,
+  getSource,
   importSource,
   getSourceChunks,
   listSources,
+  renameSource,
   retrieveRelevantSourceChunks,
   searchSourceChunks,
   suggestMemoriesFromSource,
@@ -246,6 +249,58 @@ describe("source listing and search", () => {
     const relevant = retrieveRelevantSourceChunks("Seedance storyboard prompts", runtime(root));
     expect(relevant.length).toBeGreaterThan(0);
     expect(relevant[0]?.sourceTitle).toBe("zion skank");
+  });
+
+  it("renames a source title without changing its excerpts", () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "zion-skank.md", content: SAMPLE_MARKDOWN, title: "Old source title" },
+      runtime(root)
+    );
+    const beforeChunks = getSourceChunks(summary.id, runtime(root));
+
+    const renamed = renameSource(summary.id, "Storyboard source", runtime(root));
+
+    expect(renamed.title).toBe("Storyboard source");
+    expect(renamed.original_filename).toBe("zion-skank.md");
+    expect(renamed.chunk_count).toBe(beforeChunks.length);
+    expect(getSource(summary.id, runtime(root))?.title).toBe("Storyboard source");
+    expect(getSourceChunks(summary.id, runtime(root)).map((chunk) => chunk.content)).toEqual(
+      beforeChunks.map((chunk) => chunk.content)
+    );
+  });
+
+  it("deletes a source and its excerpts", () => {
+    const root = makeProject();
+    const summary = importSource({ filename: "zion-skank.md", content: SAMPLE_MARKDOWN }, runtime(root));
+    expect(getSourceChunks(summary.id, runtime(root)).length).toBeGreaterThan(0);
+
+    deleteSource(summary.id, runtime(root));
+
+    expect(getSource(summary.id, runtime(root))).toBeUndefined();
+    expect(listSources(runtime(root))).toHaveLength(0);
+    expect(getSourceChunks(summary.id, runtime(root))).toHaveLength(0);
+    expect(searchSourceChunks("Seedance", runtime(root))).toHaveLength(0);
+  });
+
+  it("keeps approved context when the raw source is deleted", async () => {
+    const root = makeProject();
+    const summary = importSource(
+      { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
+      runtime(root)
+    );
+    const { drafts } = await suggestMemoriesFromSource(summary.id, runtime(root));
+    const approved = approveDraft(drafts[0]!.id, runtime(root));
+    const pendingBeforeDelete = listPendingDrafts(runtime(root));
+
+    deleteSource(summary.id, runtime(root));
+
+    expect(listSources(runtime(root))).toHaveLength(0);
+    expect(getSourceChunks(summary.id, runtime(root))).toHaveLength(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(1);
+    expect(listApprovedMemories(runtime(root))[0]?.id).toBe(approved.id);
+    expect(listApprovedMemories(runtime(root))[0]?.content).toBe(approved.content);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(pendingBeforeDelete.length);
   });
 });
 
@@ -839,6 +894,31 @@ describe("sources UI", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("Import a source");
     expect(html).toContain("Suggest context from this source");
+    expect(html).toContain("Rename source");
+    expect(html).toContain("Delete source");
+    expect(html).toContain("Delete this source?");
+    expect(html).toContain(
+      "This removes the imported raw source and excerpts. Approved context already created from it will remain."
+    );
     expect(html).not.toContain("source_chunks");
+  });
+
+  it("renames a source through the local UI", async () => {
+    const root = makeProject();
+    const summary = importSource({ filename: "zion-skank.md", content: SAMPLE_MARKDOWN }, runtime(root));
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/sources/rename", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ sourceId: String(summary.id), title: "Storyboard packet source" })
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Renamed source &quot;Storyboard packet source&quot;.");
+    expect(listSources(runtime(root))[0]?.title).toBe("Storyboard packet source");
   });
 });

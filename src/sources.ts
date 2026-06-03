@@ -206,6 +206,48 @@ export function getSourceChunks(sourceId: number, options: HermesRuntimeOptions 
   }
 }
 
+export function renameSource(
+  sourceId: number,
+  title: string,
+  options: HermesRuntimeOptions = {}
+): SourceSummary {
+  assertPositiveSourceId(sourceId);
+  const normalizedTitle = normalizeSourceTitle(title);
+  const db = openExistingDb(options);
+  try {
+    const info = db
+      .prepare("UPDATE sources SET title = ? WHERE id = ? AND status = 'active'")
+      .run(normalizedTitle, sourceId);
+    if (info.changes === 0) {
+      throw new Error(`Source ${sourceId} was not found.`);
+    }
+    const summary = getSourceSummary(db, sourceId);
+    if (!summary) {
+      throw new Error(`Source ${sourceId} was not found.`);
+    }
+    return summary;
+  } finally {
+    db.close();
+  }
+}
+
+export function deleteSource(sourceId: number, options: HermesRuntimeOptions = {}): void {
+  assertPositiveSourceId(sourceId);
+  const db = openExistingDb(options);
+  try {
+    const remove = db.transaction(() => {
+      db.prepare("DELETE FROM source_chunks WHERE source_id = ?").run(sourceId);
+      const info = db.prepare("DELETE FROM sources WHERE id = ? AND status = 'active'").run(sourceId);
+      if (info.changes === 0) {
+        throw new Error(`Source ${sourceId} was not found.`);
+      }
+    });
+    remove();
+  } finally {
+    db.close();
+  }
+}
+
 export function searchSourceChunks(
   query: string,
   options: HermesRuntimeOptions & { limit?: number } = {}
@@ -812,6 +854,20 @@ function titleFromFilename(filename: string): string {
   const base = filename.replace(/^.*[\\/]/, "").replace(/\.[A-Za-z0-9]+$/, "");
   const cleaned = base.replace(/[-_]+/g, " ").trim();
   return cleaned || filename;
+}
+
+function normalizeSourceTitle(title: string): string {
+  const normalized = title.trim();
+  if (!normalized) {
+    throw new Error("Source title is required.");
+  }
+  return normalized.slice(0, 200);
+}
+
+function assertPositiveSourceId(sourceId: number): void {
+  if (!Number.isInteger(sourceId) || sourceId <= 0) {
+    throw new Error("Source id must be a positive integer.");
+  }
 }
 
 function extractTerms(question: string): string[] {

@@ -105,7 +105,7 @@ In the UI:
 6. Review context suggestions, then approve context or dismiss it.
 7. Add context and save it for review.
 8. Open **Manage context** (link in the top navigation, page at `/memories`) to search, edit, or retire your approved context, and to inspect retired/superseded items.
-9. Open **LLM context pack** (link in the top navigation, page at `/memory-pack`) to export selected active approved context as a Markdown pack for an LLM or coding assistant.
+9. Open **LLM context pack** (link in the top navigation, page at `/memory-pack`) to generate selected active approved context as a Markdown pack, copy it from the browser, or download the Markdown.
 10. Open `Diagnostics` (small footer link to `/system`) only when you want setup diagnostics, deterministic reflection, or local JSON export.
 
 Only approved context is used for chat, search, and reflection. Saving a chat exchange or suggestion only saves it for review; it does not approve context.
@@ -155,7 +155,7 @@ In local deterministic mode the detector is local and rule-based. In optional Cl
 
 LLM Context Pack Export creates a clean Markdown context pack from selected active approved context. It is designed for Claude Code, Codex, ChatGPT, Claude, Gemini, and similar tools: copy/paste durable project context into a current work order without giving an assistant access to the local store.
 
-In the UI, open **LLM context pack** at `/memory-pack`, search approved context, select the context to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. Export writes a Markdown file under `.hermes/export/` and shows the Markdown preview for easy copying.
+In the UI, open **LLM context pack** at `/memory-pack`, search approved context, select the context to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. Generating the pack renders the full Markdown directly on the page with **Copy context pack** as the primary action, while **Download Markdown** and the local file under `.hermes/export/` remain secondary.
 
 The pack includes the generated timestamp, a note that it came from human-approved context, project title, optional next-step and settled-decisions sections, selected approved context grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the pack is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
 
@@ -174,9 +174,12 @@ In the `Sources` page (linked from the chat header) you can:
 
 1. Import a Markdown or text file.
 2. See your sources with title, filename, import date, and excerpt count.
-3. Search inside your sources.
-4. View a source's excerpts.
-5. Use **Suggest context from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it. As of v0.4.3 the suggestions you just created appear **inline on the Sources page**, so you can edit, approve, or dismiss each one without leaving Sources.
+3. Rename a source title or delete a raw imported source.
+4. Search inside your sources.
+5. View a source's excerpts.
+6. Use **Suggest context from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it. As of v0.4.3 the suggestions you just created appear **inline on the Sources page**, so you can edit, approve, or dismiss each one without leaving Sources.
+
+Deleting a source removes the imported raw source and excerpts. Approved context already created from that source remains approved context, and pending drafts are not cleaned up automatically.
 
 ### How source context extraction works (v0.4.2)
 
@@ -284,7 +287,7 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 
 `memory_suggestion_dismissals` stores local dismissal markers so an ignored organic suggestion does not keep reappearing for the same chat message.
 
-`sources` stores imported documents (title, original filename, type, import time, content hash, size, status). `source_chunks` stores the ordered excerpts for each source. Sources are raw imported text and are never treated as approved context; only explicit draft approval writes `memory_entries`.
+`sources` stores imported documents (title, original filename, type, import time, content hash, size, status). `source_chunks` stores the ordered excerpts for each source. Sources are raw imported text and are never treated as approved context; only explicit draft approval writes `memory_entries`. Deleting a source removes the source row and its excerpts, not approved context previously created from it.
 
 ## Human Approval Flow
 
