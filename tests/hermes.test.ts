@@ -119,7 +119,7 @@ describe("HERmes v0.1", () => {
 
     expect(approvedReport.relevantMemoryIds).toEqual([1]);
     expect(pendingReport.relevantMemoryIds).toEqual([]);
-    expect(pendingReport.basisNote).toBe("Reflection is based only on approved local memory.");
+    expect(pendingReport.basisNote).toBe("Reflection is based only on approved local context.");
   });
 
   it("export writes JSON under .hermes/export", () => {
@@ -207,7 +207,7 @@ describe("HERmes v0.1", () => {
     expect(parsed.memory_events.map((event: { event_type: string }) => event.event_type)).toContain("memory_superseded");
   });
 
-  it("project memory pack export writes selected active approved memories as Markdown", () => {
+  it("project context pack export writes selected active approved context as Markdown", () => {
     const root = makeProject();
     initHermes(runtime(root));
     const [draft] = intakeText(
@@ -231,22 +231,22 @@ describe("HERmes v0.1", () => {
     expect(result.exportPath).toBe(path.join(root, ".hermes", "export", "test-pack.md"));
     expect(fs.existsSync(result.exportPath)).toBe(true);
     const markdown = fs.readFileSync(result.exportPath, "utf8");
-    expect(markdown).toContain("# Project Memory Pack: HERmes coding context");
+    expect(markdown).toContain("# Project Context Pack: HERmes coding context");
     expect(markdown).toContain("Generated: 2026-06-02T15:04:05.000Z");
-    expect(markdown).toContain("This packet was exported from human-approved memories.");
+    expect(markdown).toContain("This context pack was exported from human-approved context.");
     expect(markdown).toContain("Project: HERmes coding context");
     expect(markdown).toContain("Wire the export through the local UI.");
     expect(markdown).toContain("Do not add MCP, connectors, or agent write access.");
     expect(markdown).toContain("## Settled decisions / things not to reopen");
-    expect(markdown).toContain(`#### Memory ${memory.id}`);
-    expect(markdown).toContain(`- Memory id: ${memory.id}`);
+    expect(markdown).toContain(`#### Context ${memory.id}`);
+    expect(markdown).toContain(`- Approved context id: ${memory.id}`);
     expect(markdown).toContain("James decided HERmes project exports should stay copy-paste only");
     expect(markdown).toContain(
       "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order."
     );
   });
 
-  it("project memory pack export rejects retired, superseded, and outside output paths", () => {
+  it("project context pack export rejects retired, superseded, and outside output paths", () => {
     const root = makeProject();
     initHermes(runtime(root));
     const [retireDraft] = intakeText("Retired project pack memory.", runtime(root));
@@ -258,9 +258,9 @@ describe("HERmes v0.1", () => {
 
     expect(() =>
       exportProjectMemoryPack({ title: "Bad pack", memoryIds: [retiredMemory.id] }, runtime(root))
-    ).toThrow(/Active approved memory/);
+    ).toThrow(/Active approved context item/);
     expect(() => exportProjectMemoryPack({ title: "Bad pack", memoryIds: [oldMemory.id] }, runtime(root))).toThrow(
-      /Active approved memory/
+      /Active approved context item/
     );
     expect(() =>
       exportProjectMemoryPack(
@@ -277,7 +277,7 @@ describe("HERmes v0.1", () => {
 
     const result = exportProjectMemoryPack({ title: "Good pack", memoryIds: [replacement.id] }, runtime(root));
     expect(path.dirname(result.exportPath)).toBe(path.join(root, ".hermes", "export"));
-    expect(path.basename(result.exportPath)).toMatch(/^project-memory-pack-\d{8}-\d{6}\.md$/);
+    expect(path.basename(result.exportPath)).toMatch(/^project-context-pack-\d{8}-\d{6}\.md$/);
     expect(result.markdown).toContain("Replacement project pack memory.");
     expect(result.markdown).not.toContain("Retired project pack memory.");
     expect(result.markdown).not.toContain("Old project pack memory.");

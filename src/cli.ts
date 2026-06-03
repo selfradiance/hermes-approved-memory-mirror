@@ -52,7 +52,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
   const program = new Command();
   program
     .name("hermes")
-    .description("HERmes approved local memory mirror")
+    .description("ContextCrate local context pack generator")
     .version("0.4.10");
 
   program
@@ -60,12 +60,12 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
     .description("Create .hermes/hermes.db and required tables")
     .action(() => {
       const paths = initHermes(runtime);
-      out(`Initialized HERmes database: ${paths.dbPath}`);
+      out(`Initialized ContextCrate database: ${paths.dbPath}`);
     });
 
   program
     .command("intake")
-    .description("Create pending memory drafts from text or one explicit file")
+    .description("Create pending context suggestions from text or one explicit file")
     .option("--text <text>", "text to intake")
     .option("--file <path>", "one explicit file path to intake")
     .option("--allow-external-file", "allow reading one explicitly supplied file outside the project")
@@ -78,39 +78,39 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
         ? intakeText(options.text, runtime)
         : intakeFile(options.file ?? "", { ...runtime, allowExternalFile: Boolean(options.allowExternalFile) });
 
-      out(`Created pending draft(s): ${drafts.map((draft) => draft.id).join(", ")}`);
+      out(`Created pending context suggestion(s): ${drafts.map((draft) => draft.id).join(", ")}`);
     });
 
   program
     .command("review")
-    .description("List pending drafts")
+    .description("List pending context suggestions")
     .action(() => {
       out(formatDrafts(listPendingDrafts(runtime)));
     });
 
   program
     .command("approve")
-    .description("Approve a pending draft into memory")
+    .description("Approve a pending suggestion into approved context")
     .argument("<draft-id>", "pending draft id")
     .option("--note <note>", "optional approval note")
     .action((draftId: string, options: { note?: string }) => {
       const memory = approveDraft(parseDraftId(draftId), { ...runtime, approvalNote: options.note });
-      out(`Approved draft ${draftId} as memory ${memory.id}.`);
+      out(`Approved suggestion ${draftId} as context item ${memory.id}.`);
     });
 
   program
     .command("reject")
-    .description("Reject a pending draft")
+    .description("Reject a pending context suggestion")
     .argument("<draft-id>", "pending draft id")
     .option("--note <note>", "optional rejection note")
     .action((draftId: string, options: { note?: string }) => {
       rejectDraft(parseDraftId(draftId), { ...runtime, note: options.note });
-      out(`Rejected draft ${draftId}.`);
+      out(`Rejected context suggestion ${draftId}.`);
     });
 
   program
     .command("list")
-    .description("List approved memory entries")
+    .description("List approved context entries")
     .option("--retired", "list retired and superseded memories")
     .action((options: { retired?: boolean }) => {
       out(formatMemories(options.retired ? listRetiredMemories(runtime) : listApprovedMemories(runtime)));
@@ -118,31 +118,31 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
 
   program
     .command("edit")
-    .description("Create an approved correction that supersedes an existing approved memory")
-    .argument("<memory-id>", "approved memory id")
-    .requiredOption("--text <text>", "replacement memory text")
+    .description("Create an approved correction that supersedes existing approved context")
+    .argument("<memory-id>", "approved context id")
+    .requiredOption("--text <text>", "replacement context text")
     .option("--note <note>", "optional correction note")
     .action((memoryId: string, options: { text: string; note?: string }) => {
       const replacement = editApprovedMemory(parseDraftId(memoryId), options.text, {
         ...runtime,
         note: options.note
       });
-      out(`Edited memory ${memoryId}; replacement memory ${replacement.id} is now active.`);
+      out(`Edited context item ${memoryId}; replacement context item ${replacement.id} is now active.`);
     });
 
   program
     .command("retire")
-    .description("Retire an approved memory from normal retrieval")
-    .argument("<memory-id>", "approved memory id")
+    .description("Retire approved context from normal retrieval")
+    .argument("<memory-id>", "approved context id")
     .option("--reason <reason>", "optional retirement reason")
     .action((memoryId: string, options: { reason?: string }) => {
       retireApprovedMemory(parseDraftId(memoryId), { ...runtime, reason: options.reason });
-      out(`Retired memory ${memoryId}.`);
+      out(`Retired context item ${memoryId}.`);
     });
 
   program
     .command("search")
-    .description("Search approved memory")
+    .description("Search approved context")
     .argument("<query>", "query text")
     .action((query: string) => {
       out(formatSearchResults(query, searchApprovedMemories(query, runtime)));
@@ -150,7 +150,7 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
 
   program
     .command("reflect")
-    .description("Create a deterministic reflection from approved memory")
+    .description("Create a deterministic reflection from approved context")
     .argument("<question>", "reflection question")
     .action((question: string) => {
       out(formatReflection(reflectOnApprovedMemory(question, runtime)));
@@ -158,14 +158,14 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
 
   program
     .command("chat")
-    .description("Open a local deterministic terminal chat mirror")
+    .description("Open a local deterministic terminal chat")
     .action(async () => {
       await runChatLoop(runtime);
     });
 
   program
     .command("export")
-    .description("Export approved memories and events")
+    .description("Export approved context and events")
     .option("--json", "write JSON export")
     .action((options: { json?: boolean }) => {
       if (!options.json) {
@@ -176,10 +176,10 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
 
   program
     .command("memory-pack")
-    .description("Export selected active approved memories as a Markdown project context packet")
+    .description("Export selected active approved context as a Markdown LLM context pack")
     .requiredOption("--title <title>", "project name/title")
-    .option("--query <query>", "select active approved memories matching this query")
-    .option("--ids <ids>", "comma-separated active approved memory ids")
+    .option("--query <query>", "select active approved context matching this query")
+    .option("--ids <ids>", "comma-separated active approved context ids")
     .option("--current-next-step <text>", "optional current next step")
     .option("--settled-decisions <text>", "optional settled decisions or things not to reopen")
     .addOption(
@@ -204,14 +204,14 @@ export function createProgram(runtime: CliRuntimeOptions = {}): Command {
           throw new Error("Use --ids or --query, not both.");
         }
         if (!options.ids && !options.query) {
-          throw new Error("Use --query or --ids to select active approved memories.");
+          throw new Error("Use --query or --ids to select active approved context.");
         }
 
         const memoryIds = options.ids
           ? parseMemoryIdList(options.ids)
           : searchApprovedMemories(options.query ?? "", runtime).map(({ memory }) => memory.id);
         if (memoryIds.length === 0) {
-          throw new Error("No active approved memories matched the selection.");
+          throw new Error("No active approved context matched the selection.");
         }
 
         const result = exportProjectMemoryPack(
@@ -249,7 +249,7 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
   let latestTurn: ChatTurn | undefined;
 
   out(
-    `HERmes chat mode: ${chatModeLabel()}. Memory approval is always human-only. Type /help for commands or /exit to leave.`
+    `ContextCrate chat mode: ${chatModeLabel()}. Context approval is always human-only. Type /help for commands or /exit to leave.`
   );
   rl.prompt();
 
@@ -272,8 +272,8 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
             "Commands:",
             "/help - show chat commands",
             "/exit - leave chat",
-            "/memories - show memories used in the latest response",
-            "/save-draft - save the latest user+HERmes exchange as a pending draft"
+            "/memories - show context used in the latest response",
+            "/save-draft - save the latest user+ContextCrate exchange as a pending suggestion"
           ].join("\n")
         );
         rl.prompt();
@@ -281,7 +281,7 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
       }
 
       if (line === "/memories") {
-        out(latestTurn ? formatMemoriesUsed(latestTurn.response.memoriesUsed) : "No response has used memories yet.");
+        out(latestTurn ? formatMemoriesUsed(latestTurn.response.memoriesUsed) : "No response has used approved context yet.");
         rl.prompt();
         continue;
       }
@@ -293,29 +293,29 @@ async function runChatLoop(runtime: CliRuntimeOptions): Promise<void> {
           continue;
         }
         const draft = saveLatestChatExchangeDraft(session.id, runtime);
-        out(`Created pending draft ${draft.id}. Review and approve it separately if it should become memory.`);
+        out(`Created pending context suggestion ${draft.id}. Review and approve it separately if it should become approved context.`);
         rl.prompt();
         continue;
       }
 
       latestTurn = await sendChatMessage(line, { ...runtime, sessionId: session.id });
       session = latestTurn.session;
-      out(`HERmes:\n${latestTurn.hermesMessage.content}`);
+      out(`ContextCrate:\n${latestTurn.hermesMessage.content}`);
       if (latestTurn.providerError) {
         out(`(Claude API was unavailable, so this reply used local deterministic mode: ${latestTurn.providerError})`);
       }
       if (latestTurn.memoryRequestNeedsPayload) {
-        out("Paste the information you want remembered, and I will save it for review.");
+        out("Paste the information you want added to context, and I will save it for review.");
       } else if (latestTurn.rememberedPayloadNoSuggestions) {
-        out("I did not find any strong standalone memories in that block. Paste a shorter note or phrase one item directly.");
+        out("I did not find any strong standalone context items in that block. Paste a shorter note or phrase one item directly.");
       } else if (latestTurn.savedDrafts && latestTurn.savedDrafts.length > 0) {
-        out(`Saved ${latestTurn.savedDrafts.length} memory suggestions for review.`);
+        out(`Saved ${latestTurn.savedDrafts.length} context suggestions for review.`);
       } else if (latestTurn.savedDraft) {
-        out("Saved as a draft. Review and approve it before it becomes memory.");
+        out("Saved for review. Review and approve it before it becomes approved context.");
       } else if (latestTurn.memorySuggestion) {
         out(
           [
-            "This may be worth remembering:",
+            "This may be useful as approved context:",
             latestTurn.memorySuggestion.proposedContent,
             "Use the local web UI to edit, save, or dismiss this suggestion."
           ].join("\n")
@@ -346,14 +346,14 @@ function parseMemoryIdList(value: string): number[] {
   for (const part of value.split(",")) {
     const parsed = Number.parseInt(part.trim(), 10);
     if (!Number.isInteger(parsed) || parsed <= 0) {
-      throw new Error("Memory ids must be positive integers.");
+      throw new Error("Context ids must be positive integers.");
     }
     if (!ids.includes(parsed)) {
       ids.push(parsed);
     }
   }
   if (ids.length === 0) {
-    throw new Error("At least one memory id is required.");
+    throw new Error("At least one context id is required.");
   }
   return ids;
 }

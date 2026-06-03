@@ -18,7 +18,7 @@ import type {
   SearchResult
 } from "./types.js";
 
-const BASIS_NOTE = "Reflection is based only on approved local memory." as const;
+const BASIS_NOTE = "Reflection is based only on approved local context." as const;
 const ACTIVE_MEMORY_WHERE = "status = 'approved' AND deleted_at IS NULL AND retired_at IS NULL";
 const MEMORY_PACK_FOOTER =
   "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order.";
@@ -432,9 +432,9 @@ export function reflectOnApprovedMemory(
 
   const patternSummary: string[] = [];
   if (relevant.length === 0) {
-    patternSummary.push("No approved local memories matched this question.");
+    patternSummary.push("No approved local context matched this question.");
   } else {
-    patternSummary.push(`Relevant approved memories found: ${relevant.length}.`);
+    patternSummary.push(`Relevant approved context items found: ${relevant.length}.`);
     patternSummary.push(`Categories represented: ${formatCounts(categories)}.`);
     if (tags.size > 0) {
       patternSummary.push(`Common tags: ${formatCounts(tags)}.`);
@@ -504,7 +504,7 @@ export function exportProjectMemoryPack(
 
   const memoryIds = uniquePositiveIds(input.memoryIds);
   if (memoryIds.length === 0) {
-    throw new Error("Select at least one active approved memory.");
+    throw new Error("Select at least one active approved context item.");
   }
 
   const generatedDate = input.generatedAt ?? new Date();
@@ -522,7 +522,7 @@ export function exportProjectMemoryPack(
     const activeById = new Map(activeMemories.map((memory) => [memory.id, memory]));
     const missingIds = memoryIds.filter((id) => !activeById.has(id));
     if (missingIds.length > 0) {
-      throw new Error(`Active approved memory ${formatIdList(missingIds)} was not found.`);
+      throw new Error(`Active approved context item ${formatIdList(missingIds)} was not found.`);
     }
 
     const selected = activeMemories.filter((memory) => memoryIds.includes(memory.id));
@@ -858,11 +858,11 @@ function buildProjectMemoryPackMarkdown(input: {
   }
 
   const lines = [
-    `# Project Memory Pack: ${input.title}`,
+    `# Project Context Pack: ${input.title}`,
     "",
     `Generated: ${input.generatedAt}`,
     "",
-    "This packet was exported from human-approved memories.",
+    "This context pack was exported from human-approved context.",
     "",
     `Project: ${input.title}`,
     ""
@@ -875,12 +875,12 @@ function buildProjectMemoryPackMarkdown(input: {
     lines.push("## Settled decisions / things not to reopen", "", input.settledDecisions, "");
   }
 
-  lines.push("## Included Approved Memories", "");
+  lines.push("## Included Approved Context", "");
   for (const group of MEMORY_PACK_GROUPS) {
     lines.push(`### ${group}`, "");
     const memories = grouped.get(group) ?? [];
     if (memories.length === 0) {
-      lines.push("_No selected memories in this group._", "");
+      lines.push("_No selected context in this group._", "");
       continue;
     }
     for (const memory of memories) {
@@ -895,14 +895,14 @@ function buildProjectMemoryPackMarkdown(input: {
 function formatMemoryPackMemory(memory: MemoryEntry): string[] {
   const tags = parseTags(memory.tags_json);
   return [
-    `#### Memory ${memory.id}`,
+    `#### Context ${memory.id}`,
     "",
-    `- Memory id: ${memory.id}`,
+    `- Approved context id: ${memory.id}`,
     `- Category: ${memory.category}`,
     `- Tags: ${tags.length > 0 ? tags.join(", ") : "(none)"}`,
     `- Created / approved: ${memory.created_at}`,
     "",
-    "Approved content:",
+    "Approved context:",
     "",
     ...formatBlockquote(memory.content)
   ];
@@ -944,15 +944,15 @@ function resolveMemoryPackExportPath(paths: HermesPaths, outPath: string | undef
     ? path.isAbsolute(outPath)
       ? path.resolve(outPath)
       : path.resolve(paths.projectRoot, outPath)
-    : path.join(exportRoot, `project-memory-pack-${formatFileTimestamp(generatedDate)}.md`);
+    : path.join(exportRoot, `project-context-pack-${formatFileTimestamp(generatedDate)}.md`);
 
   const resolved = path.resolve(candidate);
   const relative = path.relative(exportRoot, resolved);
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("Project memory pack output must be under .hermes/export.");
+    throw new Error("Project context pack output must be under .hermes/export.");
   }
   if (path.extname(resolved).toLowerCase() !== ".md") {
-    throw new Error("Project memory pack output must be a Markdown .md file.");
+    throw new Error("Project context pack output must be a Markdown .md file.");
   }
   return resolved;
 }

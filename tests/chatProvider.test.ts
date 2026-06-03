@@ -384,10 +384,10 @@ describe("Anthropic chat provider (mocked transport)", () => {
     });
 
     expect(HERMES_SYSTEM_PROMPT).toContain(
-      "HERmes is a private memory mirror and idea partner."
+      "ContextCrate is a local context generator for LLM-ready context packs."
     );
     expect(HERMES_SYSTEM_PROMPT).toContain(
-      "Use approved memories as context, not as unquestioned truth."
+      "Use approved context as context, not as unquestioned truth."
     );
     expect(capturedBody.system).toContain("[42]");
     expect(result.responseText).toContain("grounded reflection citing [42]");

@@ -115,7 +115,7 @@ const REMEMBERED_DURABLE_PATTERNS = [
   /\b(?:should|must|need to|needs to|have to|avoid|never|always|by default)\b/i,
   /\b(?:workflow|process|rule|principle|preference|goal|direction|decision|project)\b/i,
   /\buse\b.+\b(?:workflow|process|rule|approach|template|system)\b/i,
-  /\b(?:source suggestions|memory review|approved memory|approved mind mirror|hermes)\b/i
+  /\b(?:source suggestions|context suggestions|memory review|approved memory|approved context|approved mind mirror|contextcrate|hermes)\b/i
 ] as const;
 
 const CHAT_STOPWORDS = new Set([
@@ -183,7 +183,7 @@ export function createChatSession(options: HermesRuntimeOptions = {}, title?: st
  * Local, offline provider. Its text output is byte-identical to the previous
  * deterministic behavior so existing reflection/idea tests stay valid. It reads
  * memories and chat context but performs no network calls and proposes nothing
- * on its own (memory suggestions still come from the rule-based heuristics).
+ * on its own (context suggestions still come from the rule-based heuristics).
  */
 export class DeterministicChatProvider implements ChatProvider {
   readonly id = "deterministic" as const;
@@ -374,11 +374,11 @@ export function formatChatResponse(response: ChatResponse): string {
 
 export function formatMemoriesUsed(memoriesUsed: SearchResult[]): string {
   if (memoriesUsed.length === 0) {
-    return "Memories used:\n- none";
+    return "Context used:\n- none";
   }
 
   return [
-    "Memories used:",
+    "Context used:",
     ...memoriesUsed.map(({ memory, snippet }) => `- [${memory.id}] ${compactText(snippet, 140)}`)
   ].join("\n");
 }
@@ -397,7 +397,7 @@ export function saveLatestChatExchangeDraft(
       .get(sessionId) as ChatMessage | undefined;
 
     if (!hermesMessage) {
-      throw new Error("No HERmes response is available to save as a draft.");
+      throw new Error("No ContextCrate response is available to save for review.");
     }
 
     userMessage = db
@@ -417,7 +417,7 @@ export function saveLatestChatExchangeDraft(
     "User:",
     userMessage.content,
     "",
-    "HERmes:",
+    "ContextCrate:",
     hermesMessage.content
   ].join("\n");
   return createDraftFromText(draftContent, "chat", `chat_session:${sessionId}`, options);
@@ -586,7 +586,7 @@ export function listChatSessions(options: HermesRuntimeOptions = {}): ChatSessio
 function formatReflectionBody(userInput: string, memoriesUsed: SearchResult[]): string {
   if (memoriesUsed.length === 0) {
     return [
-      "I do not have an approved memory that matches this yet, so I am mirroring only the message in front of me.",
+      "I do not have approved context that matches this yet, so I am using only the message in front of me.",
       `What I hear: ${compactText(userInput, 220)}`,
       "Smallest useful next move: name the decision, artifact, or question you want this to turn into."
     ].join("\n");
@@ -600,8 +600,8 @@ function formatReflectionBody(userInput: string, memoriesUsed: SearchResult[]): 
   const tagLine = tags ? ` Tags that recur here: ${tags}.` : "";
 
   return [
-    `I found ${memoriesUsed.length} approved memor${memoriesUsed.length === 1 ? "y" : "ies"} that seem relevant: ${ids}.`,
-    `The strongest pattern I can mirror back is ${categories || "a prior note"} anchored by: ${anchor}.${tagLine}`,
+    `I found ${memoriesUsed.length} approved context item${memoriesUsed.length === 1 ? "" : "s"} that seem relevant: ${ids}.`,
+    `The strongest pattern I can use is ${categories || "a prior note"} anchored by: ${anchor}.${tagLine}`,
     `Applied to your message, I would keep the next step small and concrete: turn "${compactText(
       userInput,
       120
@@ -612,8 +612,8 @@ function formatReflectionBody(userInput: string, memoriesUsed: SearchResult[]): 
 function formatIdeaBody(memoriesUsed: SearchResult[], candidates: IdeaCandidate[]): string {
   const opening =
     memoriesUsed.length === 0
-      ? "I do not have an approved memory that matches this yet, so these ideas come only from your current message."
-      : `Here are ${candidates.length} deterministic idea candidates grounded in approved memory.`;
+      ? "I do not have approved context that matches this yet, so these ideas come only from your current message."
+      : `Here are ${candidates.length} deterministic idea candidates grounded in approved context.`;
 
   return [
     opening,
@@ -643,7 +643,7 @@ function buildIdeaCandidates(userInput: string, memoriesUsed: SearchResult[]): I
       : `${template.title}: ${titleCase(topic)}`;
     const whyItFits = memory
       ? `Memory [${memory.memory.id}] says ${compactText(memory.snippet, 120)}, giving this idea a known local anchor.`
-      : "No approved memory matched, so this is only a tentative spark from the current message.";
+      : "No approved context matched, so this is only a tentative spark from the current message.";
 
     candidates.push({
       title,

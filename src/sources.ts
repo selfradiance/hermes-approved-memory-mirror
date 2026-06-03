@@ -287,9 +287,9 @@ interface ExtractionOutcome {
 }
 
 /**
- * "Suggest memories from this source" is a full-source extraction workflow: it
+ * "Suggest context from this source" is a full-source extraction workflow: it
  * reviews every excerpt (not a chat-style top-N retrieval), avoids repeating
- * memories the user already approved or has pending, and returns up to the
+ * context the user already approved or has pending, and returns up to the
  * requested number of strong, source-grounded suggestions for human review.
  */
 export async function suggestMemoriesFromSource(

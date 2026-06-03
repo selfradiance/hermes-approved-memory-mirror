@@ -221,7 +221,7 @@ export interface ReflectionReport {
   relevantMemoryIds: number[];
   relevantSnippets: Array<{ id: number; snippet: string }>;
   patternSummary: string[];
-  basisNote: "Reflection is based only on approved local memory.";
+  basisNote: "Reflection is based only on approved local context.";
 }
 
 export interface DoctorReport {

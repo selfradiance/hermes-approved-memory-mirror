@@ -1,7 +1,7 @@
 import { createDraftProposalFromText } from "../draftGeneration.js";
 import type { MemoryProposalProvider, ReflectionInput, ReflectionProvider } from "./types.js";
 
-const BASIS_NOTE = "Reflection is based only on approved local memory." as const;
+const BASIS_NOTE = "Reflection is based only on approved local context." as const;
 
 export class NoopMemoryProposalProvider implements MemoryProposalProvider {
   async propose(input: {
@@ -26,8 +26,8 @@ export class NoopReflectionProvider implements ReflectionProvider {
       })),
       patternSummary:
         input.memories.length === 0
-          ? ["No approved local memories were supplied to the no-op reflection provider."]
-          : [`Approved local memories supplied: ${input.memories.length}.`],
+          ? ["No approved local context was supplied to the no-op reflection provider."]
+          : [`Approved local context items supplied: ${input.memories.length}.`],
       basisNote: BASIS_NOTE
     };
   }

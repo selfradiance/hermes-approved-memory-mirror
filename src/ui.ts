@@ -145,23 +145,23 @@ export async function handleUiRequest(
           notice: chatTurn.memoryRequestNeedsPayload
             ? {
                 kind: "info",
-                message: "Paste the information you want remembered, and I’ll save it for review."
+                message: "Paste the information you want added to context, and I’ll save it for review."
               }
             : chatTurn.rememberedPayloadNoSuggestions
               ? {
                   kind: "info",
                   message:
-                    "I didn’t find any strong standalone memories in that block. You can paste a shorter note or phrase one item directly."
+                    "I didn’t find any strong standalone context items in that block. You can paste a shorter note or phrase one item directly."
                 }
               : chatTurn.savedDrafts && chatTurn.savedDrafts.length > 0
                 ? {
                     kind: "success",
-                    message: `Saved ${chatTurn.savedDrafts.length} memory suggestions for review.`
+                    message: `Saved ${chatTurn.savedDrafts.length} context suggestions for review.`
                   }
             : chatTurn.providerError
             ? {
                 kind: "info",
-                message: `Claude API was unavailable, so Approved Mind Mirror replied in local deterministic mode. (${chatTurn.providerError})`
+                message: `Claude API was unavailable, so ContextCrate replied in local deterministic mode. (${chatTurn.providerError})`
               }
             : chatTurn.savedDraft
               ? {
@@ -208,7 +208,7 @@ export async function handleUiRequest(
         "Chat message id"
       );
       const suggestionKey = requiredFormValue(form, "suggestionKey", "Suggestion key is required.");
-      const proposedContent = requiredFormValue(form, "proposedContent", "Suggested memory text is required.");
+      const proposedContent = requiredFormValue(form, "proposedContent", "Suggested context text is required.");
       saveSuggestedMemoryDraft(
         { proposedContent, sourceSessionId: sessionId, sourceMessageId: messageId, suggestionKey },
         runtime
@@ -239,7 +239,7 @@ export async function handleUiRequest(
       return htmlResponse(
         renderPage(runtime, {
           activeSessionId: sessionId,
-          notice: { kind: "info", message: "Memory suggestion dismissed." }
+          notice: { kind: "info", message: "Context suggestion dismissed." }
         })
       );
     }
@@ -262,7 +262,7 @@ export async function handleUiRequest(
       const title = requiredFormValue(form, "title", "Project title is required.");
       const currentNextStep = optionalFormValue(form, "currentNextStep");
       const settledDecisions = optionalFormValue(form, "settledDecisions");
-      const memoryIds = form.getAll("memoryId").map((value) => parsePositiveInteger(value, "Memory id"));
+      const memoryIds = form.getAll("memoryId").map((value) => parsePositiveInteger(value, "Context id"));
       const result = exportProjectMemoryPack(
         {
           title,
@@ -274,7 +274,7 @@ export async function handleUiRequest(
       );
       return htmlResponse(
         renderMemoryPackPage(runtime, {
-          notice: { kind: "success", message: "Project memory pack exported locally." },
+          notice: { kind: "success", message: "LLM context pack exported locally." },
           exportPath: result.exportPath,
           memoryPackMarkdown: result.markdown,
           memoryPackSelectedIds: result.memoryIds,
@@ -289,7 +289,7 @@ export async function handleUiRequest(
       initHermes(runtime);
       return htmlResponse(
         renderPage(runtime, {
-          notice: { kind: "success", message: "Local memory database initialized." }
+          notice: { kind: "success", message: "Local context store initialized." }
         })
       );
     }
@@ -322,7 +322,7 @@ export async function handleUiRequest(
             notice: {
               kind: "info",
               message:
-                "I didn’t find any strong standalone memories in that note. You can import it as a source or save it as one memory anyway."
+                    "I didn’t find any strong standalone context items in that note. You can import it as a source or save it as one context item anyway."
             }
           })
         );
@@ -335,7 +335,7 @@ export async function handleUiRequest(
         renderPage(runtime, {
           notice: {
             kind: "success",
-            message: `Saved ${drafts.length} memory suggestion${
+            message: `Saved ${drafts.length} context suggestion${
               drafts.length === 1 ? "" : "s"
             } for review. Approve or edit each one when you’re ready.`
           }
@@ -355,7 +355,7 @@ export async function handleUiRequest(
             kind: "success",
             message: `Imported "${source.title}" as a source with ${source.chunk_count} excerpt${
               source.chunk_count === 1 ? "" : "s"
-            }. It is not an approved memory.`
+            }. It is not approved context.`
           }
         })
       );
@@ -377,7 +377,7 @@ export async function handleUiRequest(
 
     if (request.method === "POST" && url.pathname === "/drafts/approve") {
       const form = await readForm(request);
-      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Memory id is required."));
+      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Context suggestion id is required."));
       const editedContent = (form.get("content") ?? "").trim();
       if (editedContent) {
         updateDraftProposedContent(draftId, editedContent, runtime);
@@ -385,7 +385,7 @@ export async function handleUiRequest(
       approveDraft(draftId, runtime);
       const notice: Notice = {
         kind: "success",
-        message: "Approved memory. It’s now part of your approved memories."
+        message: "Approved context. It’s now part of your approved context."
       };
       const sourcesReturn = sourcesReturnState(form, draftId);
       if (sourcesReturn) {
@@ -396,7 +396,7 @@ export async function handleUiRequest(
 
     if (request.method === "POST" && url.pathname === "/drafts/reject") {
       const form = await readForm(request);
-      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Memory id is required."));
+      const draftId = parseDraftId(requiredFormValue(form, "draftId", "Context suggestion id is required."));
       rejectDraft(draftId, runtime);
       const notice: Notice = { kind: "info", message: "Dismissed." };
       const sourcesReturn = sourcesReturnState(form, draftId);
@@ -409,17 +409,17 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/memories/edit") {
       const form = await readForm(request);
       const memoryId = parsePositiveInteger(
-        requiredFormValue(form, "memoryId", "Memory id is required."),
-        "Memory id"
+        requiredFormValue(form, "memoryId", "Context id is required."),
+        "Context id"
       );
-      const content = requiredFormValue(form, "content", "Memory text is required.");
+      const content = requiredFormValue(form, "content", "Context text is required.");
       const note = optionalFormValue(form, "note");
       const replacement = editApprovedMemory(memoryId, content, { ...runtime, note });
       return htmlResponse(
         renderManageMemoriesPage(runtime, {
           notice: {
             kind: "success",
-            message: `Updated memory ${memoryId}. Replacement memory ${replacement.id} is now active.`
+            message: `Updated context item ${memoryId}. Replacement context item ${replacement.id} is now active.`
           }
         })
       );
@@ -428,14 +428,14 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/memories/retire") {
       const form = await readForm(request);
       const memoryId = parsePositiveInteger(
-        requiredFormValue(form, "memoryId", "Memory id is required."),
-        "Memory id"
+        requiredFormValue(form, "memoryId", "Context id is required."),
+        "Context id"
       );
       const reason = optionalFormValue(form, "reason");
       retireApprovedMemory(memoryId, { ...runtime, reason });
       return htmlResponse(
         renderManageMemoriesPage(runtime, {
-          notice: { kind: "info", message: `Retired memory ${memoryId}. It will no longer be used by default.` }
+          notice: { kind: "info", message: `Retired context item ${memoryId}. It will no longer be used by default.` }
         })
       );
     }
@@ -452,7 +452,7 @@ export async function handleUiRequest(
       return htmlResponse(
         renderSystemPage(runtime, {
           exportPath,
-          notice: { kind: "success", message: "Approved memories exported locally." }
+          notice: { kind: "success", message: "Approved context exported locally." }
         })
       );
     }
@@ -481,7 +481,7 @@ export async function handleUiRequest(
             kind: "success",
             message: `Imported "${source.title}" as a source with ${source.chunk_count} excerpt${
               source.chunk_count === 1 ? "" : "s"
-            }. It is not an approved memory.`
+            }. It is not approved context.`
           }
         })
       );
@@ -549,7 +549,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Approved Mind Mirror</title>
+  <title>ContextCrate</title>
   <style>
     :root {
       color-scheme: light;
@@ -948,14 +948,14 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
   <main class="app-shell">
     <header class="app-header">
       <div>
-        <h1>Approved Mind Mirror</h1>
+        <h1>ContextCrate</h1>
       </div>
       <nav class="top-actions" aria-label="App actions">
         <a href="/sources">Sources</a>
-        <a href="/memories">Manage memories</a>
-        <a href="/memory-pack">Project memory pack</a>
-        <a href="#review-drafts">Review memories${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
-        <a href="#add-memory">Add memory</a>
+        <a href="/memories">Manage context</a>
+        <a href="/memory-pack">LLM context pack</a>
+        <a href="#review-drafts">Review context${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</a>
+        <a href="#add-memory">Add context</a>
       </nav>
     </header>
 
@@ -975,8 +975,8 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       ${
         model.approvedMemories.length === 0
           ? `<div class="onboarding">
-              <p>Just start chatting. Approved Mind Mirror will suggest memories when something seems worth saving.</p>
-              <a class="link-button" href="#add-memory">Add memory</a>
+              <p>Just start chatting. ContextCrate will suggest context when something seems worth saving.</p>
+              <a class="link-button" href="#add-memory">Add context</a>
             </div>`
           : ""
       }
@@ -985,12 +985,12 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
 
     <div class="memory-panels">
       <details class="panel" id="add-memory"${model.approvedMemories.length === 0 ? " open" : ""}>
-        <summary>Add memory</summary>
+        <summary>Add context</summary>
         <div class="panel-body">
           <form class="stack" method="post" action="/drafts">
             <label>
               Paste a note
-              <textarea name="text" required placeholder="Paste something to remember after you approve it."></textarea>
+              <textarea name="text" required placeholder="Paste notes or context to review before approval."></textarea>
             </label>
             <div class="actions">
               <button type="submit">Save for review</button>
@@ -1000,7 +1000,7 @@ function renderPage(runtime: HermesRuntimeOptions, state: RenderState = {}): str
       </details>
 
       <details class="panel" id="review-drafts"${model.pendingDrafts.length > 0 ? " open" : ""}>
-        <summary>Review memory suggestions${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</summary>
+        <summary>Review context suggestions${model.pendingDrafts.length > 0 ? ` (${model.pendingDrafts.length})` : ""}</summary>
         <div class="panel-body">
           ${renderDrafts(model.pendingDrafts)}
         </div>
@@ -1055,7 +1055,7 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Approved Mind Mirror System</title>
+  <title>ContextCrate System</title>
   <style>
     :root {
       color-scheme: light;
@@ -1261,16 +1261,16 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
       <section>
-        <h2>Memory</h2>
-        <p class="hint">Your memories stay local. Only approved memories are used. No outside actions.</p>
-        <p>Approved memories: ${model.approvedMemories.length} · Memory suggestions waiting: ${
+        <h2>Context</h2>
+        <p class="hint">Your approved context stays local. Only approved context is used. No outside actions.</p>
+        <p>Approved context items: ${model.approvedMemories.length} · Context suggestions waiting: ${
           model.pendingDrafts.length
-        } · Retired memories: ${model.retiredMemories.length}</p>
-        <p><a href="/memories">Manage memories</a> to search, edit, or retire approved memories. <a href="/memories?retired=1">Show retired memories</a>.</p>
+        } · Retired context items: ${model.retiredMemories.length}</p>
+        <p><a href="/memories">Manage context</a> to search, edit, or retire approved context. <a href="/memories?retired=1">Show retired context</a>.</p>
       </section>
 
       <section>
-        <h2>Review memory suggestions</h2>
+        <h2>Review context suggestions</h2>
         <div class="stack" style="margin-top: 12px;">
           ${renderDrafts(model.pendingDrafts)}
         </div>
@@ -1281,7 +1281,7 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
         <form class="stack" method="post" action="/reflect" style="margin-top: 12px;">
           <label>
             Question
-            <input type="text" name="question" required placeholder="What should I remember about this pattern?">
+            <input type="text" name="question" required placeholder="What context should I use for this pattern?">
           </label>
           <div class="actions">
             <button type="submit">Reflect</button>
@@ -1292,7 +1292,7 @@ function renderSystemPage(runtime: HermesRuntimeOptions, state: RenderState = {}
 
       <section>
         <h2>Export</h2>
-        <p class="hint">Writes approved memory JSON locally under .hermes/export. Nothing is uploaded.</p>
+        <p class="hint">Writes approved context JSON locally under .hermes/export. Nothing is uploaded.</p>
         <form method="post" action="/export" style="margin-top: 12px;">
           <button type="submit">Export JSON</button>
         </form>
@@ -1319,7 +1319,7 @@ function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderSt
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Approved Mind Mirror — Manage memories</title>
+  <title>ContextCrate - Manage context</title>
   <style>
     :root {
       color-scheme: light;
@@ -1387,19 +1387,19 @@ function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderSt
   <div class="wrap">
     <header>
       <div>
-        <h1>Manage memories</h1>
-        <p class="hint">Edit or retire the memories you have approved. Your memories stay local; only approved memories are used.</p>
+        <h1>Manage context</h1>
+        <p class="hint">Edit or retire the context you have approved. Your approved context stays local and explicit.</p>
       </div>
       <a class="back-link" href="/">Back to chat</a>
     </header>
     <main>
       ${state.notice ? renderNotice(state.notice) : ""}
       <section>
-        <h2>${viewingRetired ? "Retired &amp; superseded memories" : "Active approved memories"}</h2>
-        <p class="hint">Active approved memories: ${model.approvedMemories.length} · Retired or superseded: ${model.retiredMemories.length}</p>
-        <p class="hint">Editing creates a new approved memory and retires the old version. Retiring keeps the memory for inspection but removes it from chat, search, reflection, and export. Nothing is ever hard-deleted automatically.</p>
+        <h2>${viewingRetired ? "Retired &amp; superseded context" : "Active approved context"}</h2>
+        <p class="hint">Active approved context: ${model.approvedMemories.length} · Retired or superseded: ${model.retiredMemories.length}</p>
+        <p class="hint">Editing creates a new approved context item and retires the old version. Retiring keeps the context for inspection but removes it from chat, search, reflection, and export. Nothing is ever hard-deleted automatically.</p>
         <div class="view-links">
-          <a href="/memories">Active memories</a>
+          <a href="/memories">Active context</a>
           <a href="/memories?retired=1">Retired &amp; superseded</a>
         </div>
       </section>
@@ -1408,10 +1408,10 @@ function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderSt
         viewingRetired
           ? ""
           : `<section>
-        <h2>Search your memories</h2>
+        <h2>Search your context</h2>
         <form class="search-row" method="get" action="/memories" style="margin-top: 12px;">
           <label>
-            Search approved memory
+            Search approved context
             <input type="search" name="query" value="${escapeAttribute(
               model.searchQuery
             )}" placeholder="Search text, tags, category, or source">
@@ -1422,7 +1422,7 @@ function renderManageMemoriesPage(runtime: HermesRuntimeOptions, state: RenderSt
       }
 
       <section>
-        <h2>${viewingRetired ? "Retired &amp; superseded" : model.searchQuery ? "Search results" : "Your approved memories"}</h2>
+        <h2>${viewingRetired ? "Retired &amp; superseded" : model.searchQuery ? "Search results" : "Your approved context"}</h2>
         <div class="stack" style="margin-top: 12px;">
           ${renderMemoryResults(model)}
         </div>
@@ -1445,7 +1445,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Approved Mind Mirror — Project memory pack</title>
+  <title>ContextCrate - LLM context pack</title>
   <style>
     :root {
       color-scheme: light;
@@ -1521,8 +1521,8 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
   <div class="wrap">
     <header>
       <div>
-        <h1>Project memory pack</h1>
-        <p class="hint">Create a copy/paste context packet from selected active approved memories.</p>
+        <h1>LLM context pack</h1>
+        <p class="hint">Create a copy-paste-ready context pack from selected approved context.</p>
       </div>
       <a class="back-link" href="/">Back to chat</a>
     </header>
@@ -1542,10 +1542,10 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       }
 
       <section>
-        <h2>Find approved memories</h2>
+        <h2>Find approved context</h2>
         <form class="search-row" method="get" action="/memory-pack" style="margin-top: 12px;">
           <label>
-            Search approved memory
+            Search approved context
             <input type="search" name="query" value="${escapeAttribute(
               model.searchQuery
             )}" placeholder="Search text, tags, category, or source">
@@ -1555,8 +1555,8 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       </section>
 
       <section>
-        <h2>Build packet</h2>
-        <p class="hint">Only active approved memories are available here. The export stays under .hermes/export and does not connect to coding agents.</p>
+        <h2>Build context pack</h2>
+        <p class="hint">Only active approved context is available here. The export stays under .hermes/export and does not connect to coding assistants or external services.</p>
         <form class="stack" method="post" action="/memory-pack/export" style="margin-top: 14px;">
           <label>
             Project name
@@ -1578,13 +1578,13 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
             )}</textarea>
           </label>
           <div>
-            <p class="item-title">${model.searchQuery ? "Matching active approved memories" : "Active approved memories"}</p>
+            <p class="item-title">${model.searchQuery ? "Matching active approved context" : "Active approved context"}</p>
             <div class="memory-choice-list" style="margin-top: 10px;">
               ${renderMemoryPackChoices(matchingMemories, selectedIds, model.searchQuery)}
             </div>
           </div>
           <div class="actions">
-            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Export Markdown pack</button>
+            <button type="submit"${matchingMemories.length === 0 ? " disabled" : ""}>Export Markdown context pack</button>
           </div>
         </form>
       </section>
@@ -1620,7 +1620,7 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Approved Mind Mirror Sources</title>
+  <title>ContextCrate Sources</title>
   <style>
     :root {
       color-scheme: light;
@@ -1689,7 +1689,7 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     <header>
       <div>
         <h1>Sources</h1>
-        <p class="hint">Imported documents you can search and draw memory suggestions from. Sources are not approved memories.</p>
+        <p class="hint">Imported documents you can search and turn into context suggestions. Sources are not approved context.</p>
       </div>
       <a class="back-link" href="/">Back to chat</a>
     </header>
@@ -1698,9 +1698,9 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
 
       ${
         inlineSuggestions.length > 0
-          ? `<section aria-label="Memory suggestions from this source">
-        <h2>Memory suggestions from this source</h2>
-        <p class="hint">Review each one here. Approving adds it to your approved memories; dismissing discards it. Nothing is approved automatically.</p>
+          ? `<section aria-label="Context suggestions from this source">
+        <h2>Context suggestions from this source</h2>
+        <p class="hint">Review each one here. Approving adds it to your approved context; dismissing discards it. Nothing is approved automatically.</p>
         <div class="stack" style="margin-top: 14px;">
           ${inlineSuggestions.map((draft) => renderDraft(draft, inlineReturnContext)).join("")}
         </div>
@@ -1728,7 +1728,7 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
                   <button type="submit">Import source</button>
                 </div>
               </form>`
-            : `<p class="empty">Your local memory store could not be opened, so importing is unavailable.</p>`
+            : `<p class="empty">Your local context store could not be opened, so importing is unavailable.</p>`
         }
       </section>
 
@@ -1802,10 +1802,10 @@ function renderSourceList(sources: SourceSummary[]): string {
         <a class="back-link" href="/sources?source=${source.id}">View excerpts</a>
         <form class="suggest-form" method="post" action="/sources/suggest">
           <input type="hidden" name="sourceId" value="${source.id}">
-          <label class="suggest-count">Number of memory suggestions
+          <label class="suggest-count">Number of context suggestions
             <input type="number" name="limit" min="1" max="10" value="7">
           </label>
-          <button class="secondary" type="submit">Suggest memories from this source</button>
+          <button class="secondary" type="submit">Suggest context from this source</button>
         </form>
       </div>
     </article>`
@@ -1818,7 +1818,7 @@ function renderSelectedSource(source: SourceSummary, chunks: SourceChunk[]): str
     <h2>${escapeHtml(source.title)}</h2>
     <p class="hint">File: ${escapeHtml(source.original_filename)} · ${chunks.length} excerpt${
       chunks.length === 1 ? "" : "s"
-    }. Excerpts are raw source text, not approved memory.</p>
+    }. Excerpts are raw source text, not approved context.</p>
     <div class="stack" style="margin-top: 14px;">
       ${
         chunks.length === 0
@@ -1934,7 +1934,7 @@ function renderChat(model: ReturnType<typeof readUiModel>): string {
         ${
           model.canReadMemory
             ? ""
-            : `<p class="hint">Approved Mind Mirror could not open your local memory store.</p>`
+            : `<p class="hint">ContextCrate could not open your local context store.</p>`
         }
       </div>
     </form>
@@ -1959,7 +1959,7 @@ function renderSourceExcerpts(excerpts: SourceChunkResult[]): string {
 
   return `<details class="memory-sources source-excerpts">
     <summary>Source excerpts</summary>
-    <p>Raw passages from imported sources. These are reference only, not approved memory.</p>
+    <p>Raw passages from imported sources. These are reference only, not approved context.</p>
     <ul>
       ${excerpts
         .map(
@@ -1972,11 +1972,11 @@ function renderSourceExcerpts(excerpts: SourceChunkResult[]): string {
 }
 
 function renderChatMessage(message: ChatMessage, approvedMemories: MemoryEntry[]): string {
-  const speaker = message.role === "user" ? "You" : "Approved Mind Mirror";
+  const speaker = message.role === "user" ? "You" : "ContextCrate";
   const content = message.role === "hermes" ? stripMemoriesUsedSection(message.content) : message.content;
   const sources =
     message.role === "hermes"
-      ? renderMemorySources(memorySourcesForMessage(message, approvedMemories), "No approved memories used for this response.")
+      ? renderMemorySources(memorySourcesForMessage(message, approvedMemories), "No approved context used for this response.")
       : "";
 
   return `<article class="chat-message ${message.role}">
@@ -2004,9 +2004,9 @@ function renderMemorySuggestion(suggestion: MemorySuggestion): string {
     : "";
   const tags = suggestion.suggestedTags.length > 0 ? suggestion.suggestedTags.join(", ") : "none";
 
-  return `<section class="memory-suggestion" aria-label="Memory suggestion">
+  return `<section class="memory-suggestion" aria-label="Context suggestion">
     <div>
-      <h3>This seems worth remembering.</h3>
+      <h3>This seems useful as approved context.</h3>
       <p class="suggestion-meta">Suggested as ${escapeHtml(
         suggestion.suggestedCategory
       )} · Tags: ${escapeHtml(tags)} · From this chat</p>
@@ -2014,7 +2014,7 @@ function renderMemorySuggestion(suggestion: MemorySuggestion): string {
     <form class="stack" method="post" action="/memory-suggestions/save">
       ${hiddenFields}
       <label>
-        Proposed memory
+        Proposed context
         <textarea name="proposedContent" required>${escapeHtml(suggestion.proposedContent)}</textarea>
       </label>
       <div class="suggestion-actions">
@@ -2035,7 +2035,7 @@ function renderMemorySources(sources: UiMemorySource[], emptyText: string): stri
   }
 
   return `<details class="memory-sources">
-    <summary>Sources from your memory</summary>
+    <summary>Sources from approved context</summary>
     <ul>
       ${sources.map((source) => `<li>[${source.id}] ${escapeHtml(source.snippet)}</li>`).join("")}
     </ul>
@@ -2053,16 +2053,16 @@ function renderLongMemoryChoice(text: string): string {
     <div class="stack">
       <div>
         <h2>This looks like a long note or source.</h2>
-        <p class="hint">Long memories can become hard to retrieve later. Choose how to handle it.</p>
+        <p class="hint">Long context blocks can become hard to retrieve later. Choose how to handle it.</p>
       </div>
       <details>
         <summary>Preview pasted note</summary>
         <pre>${escapeHtml(snippet(text, 1600))}</pre>
       </details>
-      <div class="actions" aria-label="Long memory choices">
+      <div class="actions" aria-label="Long context choices">
         <form method="post" action="/drafts/long/split">
           ${renderHiddenLongMemoryText(text)}
-          <button type="submit">Split into memory suggestions</button>
+          <button type="submit">Split into context suggestions</button>
         </form>
         <form method="post" action="/drafts/long/import">
           ${renderHiddenLongMemoryText(text)}
@@ -2070,10 +2070,10 @@ function renderLongMemoryChoice(text: string): string {
         </form>
         <form method="post" action="/drafts/long/save-one">
           ${renderHiddenLongMemoryText(text)}
-          <button class="secondary" type="submit">Save as one memory anyway</button>
+          <button class="secondary" type="submit">Save as one context item anyway</button>
         </form>
       </div>
-      <p class="hint">Anything saved as memory still waits for your approval before it becomes part of your approved memories.</p>
+      <p class="hint">Anything saved as context still waits for your approval before it becomes part of your approved context.</p>
       <a class="link-button" href="/">Back to chat</a>
     </div>
   </section>`;
@@ -2085,7 +2085,7 @@ function renderHiddenLongMemoryText(text: string): string {
 
 function renderDrafts(drafts: MemoryDraft[]): string {
   if (drafts.length === 0) {
-    return `<p class="empty">No memory suggestions waiting.</p>`;
+    return `<p class="empty">No context suggestions waiting.</p>`;
   }
 
   return `<div class="stack">${drafts.map((draft) => renderDraft(draft)).join("")}</div>`;
@@ -2110,7 +2110,7 @@ function renderDraft(draft: MemoryDraft, returnContext?: DraftReturnContext): st
       <input type="hidden" name="batchIds" value="${returnContext.batchIds.join(",")}">`
     : "";
   return `<article class="item">
-    <p class="item-title"><span>Memory suggestion</span></p>
+    <p class="item-title"><span>Context suggestion</span></p>
     <p class="meta">Suggested as ${escapeHtml(draft.proposed_category)} · Tags: ${escapeHtml(
       formatTags(draft.proposed_tags_json)
     )}</p>
@@ -2119,11 +2119,11 @@ function renderDraft(draft: MemoryDraft, returnContext?: DraftReturnContext): st
       <input type="hidden" name="draftId" value="${draft.id}">
       ${returnFields}
       <label>
-        Memory text
+        Context text
         <textarea class="draft-edit" name="content" rows="4">${escapeHtml(draft.proposed_content)}</textarea>
       </label>
       <div class="actions">
-        <button type="submit">Approve memory</button>
+        <button type="submit">Approve context</button>
       </div>
     </form>
     <form method="post" action="/drafts/reject" style="margin-top: 8px;">
@@ -2138,8 +2138,8 @@ function renderMemoryPackChoices(memories: MemoryEntry[], selectedIds: number[],
   if (memories.length === 0) {
     return `<p class="empty">${
       query
-        ? `No active approved memories matched "${escapeHtml(query)}".`
-        : "No active approved memories are available."
+        ? `No active approved context matched "${escapeHtml(query)}".`
+        : "No active approved context is available."
     }</p>`;
   }
 
@@ -2168,13 +2168,13 @@ function renderMemoryResults(model: ReturnType<typeof readUiModel>): string {
   if (model.searchQuery) {
     const results = model.searchResults ?? [];
     if (results.length === 0) {
-      return `<p class="empty">No approved memories matched "${escapeHtml(model.searchQuery)}".</p>`;
+      return `<p class="empty">No approved context matched "${escapeHtml(model.searchQuery)}".</p>`;
     }
     return results.map(({ memory, snippet }) => renderMemory(memory, snippet)).join("");
   }
 
   if (model.approvedMemories.length === 0) {
-    return `<p class="empty">No approved memories.</p>`;
+    return `<p class="empty">No approved context.</p>`;
   }
   return model.approvedMemories.map((memory) => renderMemory(memory)).join("");
 }
@@ -2188,12 +2188,12 @@ function renderMemory(memory: MemoryEntry, snippet?: string): string {
     <p class="meta">Source: ${escapeHtml(memory.source_type)} ${escapeHtml(memory.source_label)}</p>
     <p class="content">${escapeHtml(snippet ?? memory.content)}</p>
     <details style="margin-top: 10px;">
-      <summary>Edit memory</summary>
-      <p class="hint">Editing creates a new approved memory and retires this version from normal use.</p>
+      <summary>Edit context</summary>
+      <p class="hint">Editing creates a new approved context item and retires this version from normal use.</p>
       <form class="stack" method="post" action="/memories/edit" style="margin-top: 10px;">
         <input type="hidden" name="memoryId" value="${memory.id}">
         <label>
-          Memory text
+          Context text
           <textarea class="draft-edit" name="content" rows="4" required>${escapeHtml(memory.content)}</textarea>
         </label>
         <label>
@@ -2201,7 +2201,7 @@ function renderMemory(memory: MemoryEntry, snippet?: string): string {
           <input type="text" name="note" placeholder="What changed?">
         </label>
         <div class="actions">
-          <button type="submit">Save edited memory</button>
+          <button type="submit">Save edited context</button>
         </div>
       </form>
     </details>
@@ -2219,7 +2219,7 @@ function renderMemory(memory: MemoryEntry, snippet?: string): string {
           <option value="other">Other</option>
         </select>
       </label>
-      <button class="danger" type="submit">Retire memory</button>
+      <button class="danger" type="submit">Retire context</button>
     </form>
   </article>`;
 }
@@ -2227,14 +2227,14 @@ function renderMemory(memory: MemoryEntry, snippet?: string): string {
 function renderRetiredMemories(retiredMemories: MemoryEntry[], activeMemories: MemoryEntry[]): string {
   if (retiredMemories.length === 0) {
     return `<div class="stack">
-      <p class="empty">No retired memories.</p>
-      <p><a href="/memories">Show active memories</a></p>
+      <p class="empty">No retired context.</p>
+      <p><a href="/memories">Show active context</a></p>
     </div>`;
   }
 
   return `<div class="stack">
-    <p class="hint">Retired and superseded memories are kept for inspection, but are not used by chat, search, reflection, or export by default.</p>
-    <p><a href="/memories">Show active memories</a></p>
+    <p class="hint">Retired and superseded context is kept for inspection, but is not used by chat, search, reflection, or export by default.</p>
+    <p><a href="/memories">Show active context</a></p>
     ${retiredMemories.map((memory) => renderRetiredMemory(memory, activeMemories)).join("")}
   </div>`;
 }
@@ -2250,9 +2250,9 @@ function renderRetiredMemory(memory: MemoryEntry, activeMemories: MemoryEntry[])
     )} · Reason: ${escapeHtml(memory.retired_reason ?? "(none)")}</p>
     ${
       replacement
-        ? `<p class="meta">Replacement memory: [${replacement.id}]</p>`
+        ? `<p class="meta">Replacement context item: [${replacement.id}]</p>`
         : memory.supersedes_id
-          ? `<p class="meta">Supersedes memory: [${memory.supersedes_id}]</p>`
+          ? `<p class="meta">Supersedes context item: [${memory.supersedes_id}]</p>`
           : ""
     }
     <p class="content">${escapeHtml(memory.content)}</p>
@@ -2261,11 +2261,11 @@ function renderRetiredMemory(memory: MemoryEntry, activeMemories: MemoryEntry[])
 
 function renderReflection(report: ReflectionReport): string {
   return `<div class="stack" style="margin-top: 16px;">
-    <p class="notice info">Deterministic reflection from approved memories only.</p>
+    <p class="notice info">Deterministic reflection from approved context only.</p>
     <pre>${escapeHtml(
       [
         `Question: ${report.question}`,
-        `Relevant memory ids: ${report.relevantMemoryIds.length > 0 ? report.relevantMemoryIds.join(", ") : "none"}`,
+        `Relevant context ids: ${report.relevantMemoryIds.length > 0 ? report.relevantMemoryIds.join(", ") : "none"}`,
         "Relevant snippets:",
         ...(report.relevantSnippets.length > 0
           ? report.relevantSnippets.map(({ id, snippet }) => `- [${id}] ${snippet}`)
@@ -2288,7 +2288,7 @@ function memorySourcesForMessage(message: ChatMessage, approvedMemories: MemoryE
   const memoriesById = new Map(approvedMemories.map((memory) => [memory.id, memory]));
   return parseMemoryIds(message.memory_ids_json).map((id) => ({
     id,
-    snippet: compactText(memoriesById.get(id)?.content ?? "Memory is not available in the approved list.", 140)
+    snippet: compactText(memoriesById.get(id)?.content ?? "Context is not available in the approved list.", 140)
   }));
 }
 
@@ -2305,7 +2305,7 @@ function parseMemoryIds(memoryIdsJson: string): number[] {
 }
 
 function stripMemoriesUsedSection(content: string): string {
-  return content.split(/\n\nMemories used:\n/)[0] ?? content;
+  return content.split(/\n\n(?:Context used|Memories used):\n/)[0] ?? content;
 }
 
 function compactText(content: string, maxLength: number): string {
@@ -2648,8 +2648,8 @@ const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
 if (import.meta.url === invokedPath) {
   startUiServer(runtimeFromEnvironment())
     .then(({ url }) => {
-      process.stdout.write(`Approved Mind Mirror Local Web Chat: ${url}\n`);
-      process.stdout.write("Local-only. Only approved memories are used for chat/list/search/reflect.\n");
+      process.stdout.write(`ContextCrate Local Web Chat: ${url}\n`);
+      process.stdout.write("Local-only. Only approved context is used for chat/list/search/reflect.\n");
     })
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);

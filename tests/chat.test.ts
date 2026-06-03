@@ -83,7 +83,7 @@ describe("HERmes v0.2 chat", () => {
 
     const exportPath = path.join(root, ".hermes", "export", "cli-pack.md");
     expect(output.join("\n")).toContain(`Export written: ${exportPath}`);
-    expect(fs.readFileSync(exportPath, "utf8")).toContain("# Project Memory Pack: CLI packet");
+    expect(fs.readFileSync(exportPath, "utf8")).toContain("# Project Context Pack: CLI packet");
     expect(fs.readFileSync(exportPath, "utf8")).toContain("## Settled decisions / things not to reopen");
     expect(fs.readFileSync(exportPath, "utf8")).toContain("CLI memory pack export should stay");
   });
@@ -119,7 +119,7 @@ describe("HERmes v0.2 chat", () => {
     const turn = await sendChatMessage("What about Cobalt chat memory?", runtime(root));
 
     expect(turn.response.memoriesUsed).toHaveLength(0);
-    expect(turn.hermesMessage.content).toContain("Memories used:\n- none");
+    expect(turn.hermesMessage.content).toContain("Context used:\n- none");
   });
 
   it("idea mode returns multiple ideas with memory references", async () => {

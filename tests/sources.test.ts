@@ -526,7 +526,7 @@ describe("provider context distinguishes memories from source excerpts", () => {
 
     expect(capturedBody.system).toContain("Source excerpts");
     expect(capturedBody.system).toContain("zion skank");
-    expect(capturedBody.system).toContain("not approved memory");
+    expect(capturedBody.system).toContain("not approved context");
   });
 });
 
@@ -595,7 +595,7 @@ describe("provider source extraction", () => {
   });
 });
 
-describe("sources UI memory suggestions", () => {
+describe("sources UI context suggestions", () => {
   it("reports the number of suggestions and renders editable review cards", async () => {
     const root = makeProject();
     const summary = importSource(
@@ -616,7 +616,7 @@ describe("sources UI memory suggestions", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("Suggested");
     expect(html).toContain("for review");
-    // Review cards expose the full memory text in an editable textarea, not a clipped paragraph.
+    // Review cards expose the full context text in an editable textarea, not a clipped paragraph.
     expect(html).toContain('name="content"');
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
     expect(listPendingDrafts(runtime(root)).length).toBeGreaterThan(0);
@@ -646,7 +646,7 @@ describe("sources UI memory suggestions", () => {
     expect(html).toContain("Only");
   });
 
-  it("approves an edited suggestion using the submitted memory text", async () => {
+  it("approves an edited suggestion using the submitted context text", async () => {
     const root = makeProject();
     const summary = importSource(
       { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
@@ -675,7 +675,7 @@ describe("sources UI memory suggestions", () => {
 });
 
 describe("sources UI inline suggestion review", () => {
-  it("creates pending suggestions only, never approved memory, from /sources/suggest", async () => {
+  it("creates pending suggestions only, never approved context, from /sources/suggest", async () => {
     const root = makeProject();
     const summary = importSource(
       { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
@@ -714,7 +714,7 @@ describe("sources UI inline suggestion review", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Memory suggestions from this source");
+    expect(html).toContain("Context suggestions from this source");
     // Inline cards carry the return context so approve/dismiss stay on Sources.
     expect(html).toContain('name="returnTo" value="sources"');
     expect(html).toContain('name="batchIds"');
@@ -755,7 +755,7 @@ describe("sources UI inline suggestion review", () => {
     expect(html).not.toContain(`name="draftId" value="${draftId}"`);
   });
 
-  it("dismisses an inline suggestion without creating approved memory", async () => {
+  it("dismisses an inline suggestion without creating approved context", async () => {
     const root = makeProject();
     const summary = importSource(
       { filename: "identity.md", content: METADATA_HEAVY_MARKDOWN },
@@ -803,12 +803,12 @@ describe("sources UI inline suggestion review", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).not.toContain("Memory suggestions from this source");
+    expect(html).not.toContain("Context suggestions from this source");
   });
 });
 
 describe("sources UI", () => {
-  it("imports a source through the local UI and never auto-approves memory", async () => {
+  it("imports a source through the local UI and never auto-approves context", async () => {
     const root = makeProject();
 
     const response = await handleUiRequest(
@@ -822,7 +822,7 @@ describe("sources UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("is not an approved memory");
+    expect(html).toContain("is not approved context");
     expect(listSources(runtime(root))).toHaveLength(1);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
@@ -838,7 +838,7 @@ describe("sources UI", () => {
     const html = await response.text();
     expect(response.status).toBe(200);
     expect(html).toContain("Import a source");
-    expect(html).toContain("Suggest memories from this source");
+    expect(html).toContain("Suggest context from this source");
     expect(html).not.toContain("source_chunks");
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "hermes-approved-memory-mirror",
   "version": "0.4.10",
-  "description": "A safe local approved-memory mirror CLI for James.",
+  "description": "A safe local context-pack generator CLI for James.",
   "type": "module",
   "bin": {
     "hermes": "dist/cli.js"

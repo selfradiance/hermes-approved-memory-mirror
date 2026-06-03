@@ -74,20 +74,20 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("<h1>Approved Mind Mirror</h1>");
-    expect(html).toContain("Just start chatting. Approved Mind Mirror will suggest memories when something seems worth saving.");
+    expect(html).toContain("<h1>ContextCrate</h1>");
+    expect(html).toContain("Just start chatting. ContextCrate will suggest context when something seems worth saving.");
     expect(html).not.toContain("HERmes");
     expect(fs.existsSync(path.join(root, ".hermes", "hermes.db"))).toBe(true);
   });
 
-  it("uses human-facing memory language on the default chat page", async () => {
+  it("uses human-facing context language on the default chat page", async () => {
     const root = makeProject();
 
     const response = await handleUiRequest(getRequest("/"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Review memory suggestions");
+    expect(html).toContain("Review context suggestions");
     expect(html).toContain("Save for review");
     expect(html).not.toContain(">Create draft<");
     expect(html).not.toContain(">Save as draft<");
@@ -102,7 +102,7 @@ describe("HERmes Local Web Chat UI", () => {
 
     expect(response.status).toBe(200);
     expect(html).not.toContain("Your memories stay local.");
-    expect(html).not.toContain("Only approved memories are used.");
+    expect(html).not.toContain("Only approved context is used.");
     expect(html).not.toContain("No outside actions.");
     expect(html).not.toContain("HERmes can suggest memories from chat. Nothing becomes an approved memory until you approve it.");
     expect(html).not.toContain("No chat messages yet.");
@@ -110,7 +110,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("Saving an exchange only saves it for review.");
     expect(html).not.toContain("Sources from your memory: none yet.");
     expect(html).not.toContain("Sources from your memory");
-    expect(html).not.toContain("No approved memories were used for the latest response.");
+    expect(html).not.toContain("No approved context used for the latest response.");
     expect(html).not.toContain('class="memory-sources"');
     expect(html).toContain('placeholder="Message…"');
   });
@@ -129,6 +129,7 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).not.toContain("chat_sessions");
     expect(html).not.toContain("chat_messages");
     expect(html).not.toContain("External connectors/tools configured");
+    expect(html).not.toContain("ContextCrate posture");
     expect(html).not.toContain("HERmes posture");
     expect(html).not.toContain("Initialize Local Database");
     expect(html).toContain('href="/system"');
@@ -262,10 +263,10 @@ describe("HERmes Local Web Chat UI", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("This looks like a long note or source.");
-    expect(html).toContain("Long memories can become hard to retrieve later. Choose how to handle it.");
-    expect(html).toContain("Split into memory suggestions");
+    expect(html).toContain("Long context blocks can become hard to retrieve later. Choose how to handle it.");
+    expect(html).toContain("Split into context suggestions");
     expect(html).toContain("Import as source");
-    expect(html).toContain("Save as one memory anyway");
+    expect(html).toContain("Save as one context item anyway");
     expect(html).not.toContain("memory_entries");
     expect(html).not.toContain("memory_drafts");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
@@ -314,7 +315,7 @@ describe("HERmes Local Web Chat UI", () => {
     const drafts = listPendingDrafts(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(html).toContain("memory suggestions for review");
+    expect(html).toContain("context suggestions for review");
     expect(drafts.length).toBeGreaterThan(1);
     expect(drafts.map((draft) => draft.proposed_content).join("\n")).toContain("inline source suggestions");
     expect(drafts.every((draft) => draft.proposed_content.length < text.length)).toBe(true);
@@ -337,31 +338,31 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Approved memory.");
+    expect(html).toContain("Approved context.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
     expect(listApprovedMemories(runtime(root))).toHaveLength(1);
     expect(listApprovedMemories(runtime(root))[0]?.content).toContain("Approve this UI draft");
   });
 
-  it("shows a visible Manage memories entry point in the main page navigation", async () => {
+  it("shows a visible Manage context entry point in the main page navigation", async () => {
     const root = makeProject();
 
     const response = await handleUiRequest(getRequest("/"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Manage memories");
+    expect(html).toContain("Manage context");
     expect(html).toContain('href="/memories"');
   });
 
-  it("shows a visible Project memory pack entry point in the main page navigation", async () => {
+  it("shows a visible LLM context pack entry point in the main page navigation", async () => {
     const root = makeProject();
 
     const response = await handleUiRequest(getRequest("/"), runtime(root));
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Project memory pack");
+    expect(html).toContain("LLM context pack");
     expect(html).toContain('href="/memory-pack"');
   });
 
@@ -375,10 +376,10 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Manage memories");
+    expect(html).toContain("Manage context");
     expect(html).toContain("Approved memory that can be corrected.");
-    expect(html).toContain("Edit memory");
-    expect(html).toContain("Retire memory");
+    expect(html).toContain("Edit context");
+    expect(html).toContain("Retire context");
     expect(html).toContain('action="/memories/edit"');
     expect(html).toContain('action="/memories/retire"');
   });
@@ -396,7 +397,7 @@ describe("HERmes Local Web Chat UI", () => {
       expect(home.status).toBe(200);
       expect(await home.text()).toContain("Mode: Local");
       expect(manage.status).toBe(200);
-      expect(await manage.text()).toContain("Manage memories");
+      expect(await manage.text()).toContain("Manage context");
     } finally {
       if (priorProvider !== undefined) process.env.HERMES_CHAT_PROVIDER = priorProvider;
       if (priorKey !== undefined) process.env.ANTHROPIC_API_KEY = priorKey;
@@ -440,7 +441,7 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("<h1>Project memory pack</h1>");
+    expect(html).toContain("<h1>LLM context pack</h1>");
     expect(html).toContain("Approved memory pack UI memory.");
     expect(html).not.toContain("Retired memory pack UI memory.");
     expect(html).toContain('type="checkbox" name="memoryId"');
@@ -488,14 +489,14 @@ describe("HERmes Local Web Chat UI", () => {
     const markdown = fs.readFileSync(path.join(exportDir, files[0] ?? ""), "utf8");
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Project memory pack exported locally.");
+    expect(html).toContain("LLM context pack exported locally.");
     expect(html).toContain("Local export path:");
     expect(html).toContain("Markdown preview");
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/^project-memory-pack-\d{8}-\d{6}\.md$/);
-    expect(markdown).toContain("# Project Memory Pack: HERmes export test");
+    expect(files[0]).toMatch(/^project-context-pack-\d{8}-\d{6}\.md$/);
+    expect(markdown).toContain("# Project Context Pack: HERmes export test");
     expect(markdown).toContain("## Settled decisions / things not to reopen");
-    expect(markdown).toContain(`#### Memory ${memory.id}`);
+    expect(markdown).toContain(`#### Context ${memory.id}`);
     expect(markdown).toContain("Coding agents should receive approved context only.");
     expect(markdown).toContain(
       "This is context for a coding assistant. It is not permission to edit files, commit, push, run commands, access accounts, or take external actions unless James explicitly says so in the current work order."
@@ -521,7 +522,7 @@ describe("HERmes Local Web Chat UI", () => {
     const retired = listRetiredMemories(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Replacement memory");
+    expect(html).toContain("Replacement context item");
     expect(active).toHaveLength(1);
     expect(active[0]?.content).toContain("better retrieval wording");
     expect(active[0]?.supersedes_id).toBe(memory.id);
@@ -543,10 +544,10 @@ describe("HERmes Local Web Chat UI", () => {
     const searchPage = await handleUiRequest(getRequest("/memories?query=Cobalt"), runtime(root));
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Retired memory");
-    expect(await searchPage.text()).toContain('No approved memories matched "Cobalt".');
+    expect(await response.text()).toContain("Retired context item");
+    expect(await searchPage.text()).toContain('No approved context matched "Cobalt".');
     const retiredHtml = await retiredPage.text();
-    expect(retiredHtml).toContain("Retired and superseded memories are kept for inspection");
+    expect(retiredHtml).toContain("Retired and superseded context is kept for inspection");
     expect(retiredHtml).toContain("Cobalt retired UI memory.");
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
     expect(listRetiredMemories(runtime(root))).toHaveLength(1);
@@ -585,8 +586,8 @@ describe("HERmes Local Web Chat UI", () => {
     );
 
     expect(await approvedSearch.text()).toContain("Approved amber workflow");
-    expect(await rejectedSearch.text()).toContain('No approved memories matched "cobalt".');
-    expect(await rejectedReflection.text()).toContain("No approved local memories matched this question.");
+    expect(await rejectedSearch.text()).toContain('No approved context matched "cobalt".');
+    expect(await rejectedReflection.text()).toContain("No approved local context matched this question.");
     expect(reflectOnApprovedMemory("What about cobalt?", runtime(root)).relevantMemoryIds).toEqual([]);
   });
 
@@ -604,8 +605,8 @@ describe("HERmes Local Web Chat UI", () => {
     const [session] = listChatSessions(runtime(root));
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Approved Mind Mirror");
-    expect(html).toContain("Sources from your memory");
+    expect(html).toContain("ContextCrate");
+    expect(html).toContain("Sources from approved context");
     expect(html).toContain(`[${memory.id}]`);
     expect(html).toContain("Seedance storyboard ideas");
     expect(session).toBeDefined();
@@ -628,8 +629,8 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("This seems worth remembering.");
-    expect(html).toContain("Proposed memory");
+    expect(html).toContain("This seems useful as approved context.");
+    expect(html).toContain("Proposed context");
     expect(html).toContain("Save for review");
     expect(html).toContain("Dismiss");
     expect(html).toContain("I prefer project notes");
@@ -669,8 +670,8 @@ describe("HERmes Local Web Chat UI", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Paste the information you want remembered");
-    expect(html).not.toContain("This seems worth remembering.");
+    expect(html).toContain("Paste the information you want added to context");
+    expect(html).not.toContain("This seems useful as approved context.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
   });
@@ -706,7 +707,7 @@ describe("HERmes Local Web Chat UI", () => {
 
     expect(response.status).toBe(200);
     expect(savedHtml).toContain("Saved for review.");
-    expect(savedHtml).not.toContain("This seems worth remembering.");
+    expect(savedHtml).not.toContain("This seems useful as approved context.");
     expect(pendingDrafts).toHaveLength(1);
     expect(pendingDrafts[0]?.status).toBe("pending");
     expect(listApprovedMemories(runtime(root))).toHaveLength(0);
@@ -739,8 +740,8 @@ describe("HERmes Local Web Chat UI", () => {
     const dismissedHtml = await response.text();
 
     expect(response.status).toBe(200);
-    expect(dismissedHtml).toContain("Memory suggestion dismissed.");
-    expect(dismissedHtml).not.toContain("This seems worth remembering.");
+    expect(dismissedHtml).toContain("Context suggestion dismissed.");
+    expect(dismissedHtml).not.toContain("This seems useful as approved context.");
     expect(listPendingDrafts(runtime(root))).toHaveLength(0);
   });
 
@@ -778,7 +779,7 @@ describe("HERmes Local Web Chat UI", () => {
     const exportPath = path.join(root, ".hermes", "export", "memories-export.json");
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Approved memories exported locally.");
+    expect(html).toContain("Approved context exported locally.");
     expect(html).toContain(exportPath);
     expect(fs.existsSync(exportPath)).toBe(true);
   });

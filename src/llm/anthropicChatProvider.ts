@@ -19,32 +19,32 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const MEMORY_SUGGESTION_PREFIX = "MEMORY_SUGGESTION:";
 
 export const HERMES_SYSTEM_PROMPT = [
-  "HERmes is a private memory mirror and idea partner.",
-  "Use approved memories as context, not as unquestioned truth.",
+  "ContextCrate is a local context generator for LLM-ready context packs.",
+  "Use approved context as context, not as unquestioned truth.",
   "Be conversational, concise, and idea-oriented.",
   "Do not claim to have performed actions.",
-  "Do not say you saved memory unless the app explicitly saved it for review.",
-  "Suggest memory only when the user states a durable preference, decision, goal, project direction, or recurring pattern.",
+  "Do not say you saved context unless the app explicitly saved it for review.",
+  "Suggest context only when the user states a durable preference, decision, goal, project direction, or recurring pattern.",
   "If the user asks you to remember this, remember it all, save this, or add this to memory, treat that as an instruction, not as memory content.",
   "When that instruction includes pasted content, propose only durable facts, preferences, or project context from the pasted content; never propose the instruction phrase itself.",
-  "If there is no actual payload to remember, omit the memory suggestion and invite the user to paste the information.",
-  "Approved memories are durable, human-approved context. Source excerpts are raw, possibly incomplete passages from imported documents.",
-  "Treat source excerpts as reference material only; never present them as approved memory, and prefer approved memories when they conflict.",
-  "You have no tools, cannot browse, cannot run code, and cannot approve or write memory.",
-  `When (and only when) a durable item is worth remembering, end your reply with a separate final line in the exact form "${MEMORY_SUGGESTION_PREFIX} <one concise sentence>". Otherwise omit that line entirely.`
+  "If there is no actual payload, omit the context suggestion and invite the user to paste the information.",
+  "Approved context is durable, human-approved context. Source excerpts are raw, possibly incomplete passages from imported documents.",
+  "Treat source excerpts as reference material only; never present them as approved context, and prefer approved context when they conflict.",
+  "You have no tools, cannot browse, cannot run code, and cannot approve or write context.",
+  `When (and only when) a durable item is useful as approved context, end your reply with a separate final line in the exact form "${MEMORY_SUGGESTION_PREFIX} <one concise sentence>". Otherwise omit that line entirely.`
 ].join("\n");
 
 export const SOURCE_EXTRACTION_PROMPT = [
-  "You review an imported document as source material (not as a chat) and extract durable, high-value memories for future conversations with the user.",
-  "Read all of the provided excerpts. Extract the strongest memories worth keeping long term: stable preferences, project direction, identity anchors, recurring principles, workflows, decision patterns, health and training patterns, creative direction, finance or Bitcoin thesis, and AI or coding principles.",
+  "You review an imported document as source material (not as a chat) and extract durable, high-value context suggestions for future LLM handoffs.",
+  "Read all of the provided excerpts. Extract the strongest context worth keeping long term: stable preferences, project direction, identity anchors, recurring principles, workflows, decision patterns, health and training patterns, creative direction, finance or Bitcoin thesis, and AI or coding principles.",
   "Ignore document metadata such as the title, filename, creation date, \"purpose\" lines, and headings (for example \"MASTER IDENTITY DOCUMENT\") unless the line itself states a durable fact.",
   "Do not summarize the document. Do not propose vague fragments, bare labels, headings, or trivial facts.",
-  "If the text includes a request such as \"remember this\" or \"can you remember all this\", treat that as instruction text only and never return it as a memory.",
-  "Do not repeat memories the user already has. Skip anything that duplicates or closely restates a listed existing memory.",
+  "If the text includes a request such as \"remember this\" or \"can you remember all this\", treat that as instruction text only and never return it as context.",
+  "Do not repeat context the user already has. Skip anything that duplicates or closely restates listed existing context.",
   "Each suggestion must be a complete, standalone sentence that makes sense on its own.",
   "Return exactly the requested number of suggestions when there is enough strong material. If there is less, return only the genuinely strong ones rather than padding with weak ones.",
   "Phrase suggestions cautiously and do not infer sensitive identity claims beyond what the source clearly states.",
-  "You have no tools and cannot approve or write memory; a human reviews and approves every suggestion.",
+  "You have no tools and cannot approve or write context; a human reviews and approves every suggestion.",
   "Return ONLY a JSON array. Each element is an object with keys: \"content\" (string, required), \"category\" (string), \"tags\" (array of strings), \"rationale\" (short string), and \"chunkIndexes\" (array of integers). Return [] if nothing is worth saving. Output no prose outside the JSON."
 ].join("\n");
 
@@ -111,7 +111,7 @@ export class AnthropicChatProvider implements ChatProvider {
     if (input.existingMemories && input.existingMemories.length > 0) {
       sections.push(
         [
-          "Avoid repeating these existing approved or pending memories (skip near-duplicates):",
+          "Avoid repeating these existing approved or pending context items (skip near-duplicates):",
           ...input.existingMemories.map((memory) => `- ${memory}`)
         ].join("\n")
       );
@@ -211,11 +211,11 @@ function parseSourceCandidates(rawText: string, limit: number): SourceMemoryCand
 
 function formatMemoryContext(memories: SearchResult[]): string {
   if (memories.length === 0) {
-    return "Retrieved approved memories: none. Rely only on the current conversation.";
+    return "Retrieved approved context: none. Rely only on the current conversation.";
   }
 
   return [
-    "Retrieved approved memories (cite the [id] when one informs your reply):",
+    "Retrieved approved context (cite the [id] when one informs your reply):",
     ...memories.map(({ memory, snippet }) => `- [${memory.id}] ${compact(snippet, 280)}`)
   ].join("\n");
 }
@@ -226,7 +226,7 @@ function formatSourceContext(sourceChunks: SourceChunkResult[]): string {
   }
 
   return [
-    "Source excerpts (raw passages from imported documents; reference only, not approved memory):",
+    "Source excerpts (raw passages from imported documents; reference only, not approved context):",
     ...sourceChunks.map(
       ({ chunk, sourceTitle, snippet }) =>
         `- "${compact(sourceTitle, 80)}" (excerpt ${chunk.chunk_index + 1}): ${compact(snippet, 280)}`

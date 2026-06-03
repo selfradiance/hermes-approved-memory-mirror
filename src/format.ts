@@ -9,11 +9,11 @@ import type {
 
 export function formatDrafts(drafts: MemoryDraft[]): string {
   if (drafts.length === 0) {
-    return "No pending drafts.";
+    return "No context suggestions waiting.";
   }
 
   return [
-    `Pending drafts: ${drafts.length}`,
+    `Context suggestions waiting: ${drafts.length}`,
     ...drafts.map((draft) =>
       [
         `[${draft.id}] ${draft.proposed_category}`,
@@ -28,14 +28,14 @@ export function formatDrafts(drafts: MemoryDraft[]): string {
 
 export function formatMemories(memories: MemoryEntry[]): string {
   if (memories.length === 0) {
-    return "No approved memories.";
+    return "No approved context.";
   }
 
   const allActive = memories.every(
     (memory) => memory.status === "approved" && !memory.deleted_at && !memory.retired_at
   );
   return [
-    `${allActive ? "Approved memories" : "Memories"}: ${memories.length}`,
+    `${allActive ? "Approved context" : "Context"}: ${memories.length}`,
     ...memories.map((memory) =>
       [
         `[${memory.id}] ${memory.category}`,
@@ -54,7 +54,7 @@ export function formatMemories(memories: MemoryEntry[]): string {
 
 export function formatSearchResults(query: string, results: SearchResult[]): string {
   if (results.length === 0) {
-    return `No approved memories matched "${query}".`;
+    return `No approved context matched "${query}".`;
   }
 
   return [
@@ -66,7 +66,7 @@ export function formatSearchResults(query: string, results: SearchResult[]): str
 export function formatReflection(report: ReflectionReport): string {
   return [
     `Question: ${report.question}`,
-    `Relevant memory ids: ${report.relevantMemoryIds.length > 0 ? report.relevantMemoryIds.join(", ") : "none"}`,
+    `Relevant context ids: ${report.relevantMemoryIds.length > 0 ? report.relevantMemoryIds.join(", ") : "none"}`,
     "Relevant snippets:",
     ...(report.relevantSnippets.length > 0
       ? report.relevantSnippets.map(({ id, snippet }) => `- [${id}] ${snippet}`)
@@ -84,12 +84,12 @@ export function formatDoctor(report: DoctorReport): string {
     "Tables:",
     ...Object.entries(report.tables).map(([table, exists]) => `- ${table}: ${exists ? "yes" : "no"}`),
     `Pending drafts: ${report.pendingDraftCount}`,
-    `Approved memories: ${report.approvedMemoryCount}`,
+    `Approved context items: ${report.approvedMemoryCount}`,
     `External connectors/tools configured: ${
       report.externalConnectorsConfigured || report.toolsConfigured ? "yes" : "no"
     }`,
     `Chat provider: ${report.chatProviderLabel}`,
-    "HERmes posture: local CLI/local interface only; no connectors, no tools, no MCP, no background daemon. Chat text may use the optional Claude API provider, but it gets no tools and cannot approve memory or take actions."
+    "ContextCrate posture: local CLI/local interface only; no connectors, no tools, no MCP, no background daemon. Chat text may use the optional Claude API provider, but it gets no tools and cannot approve context or take actions."
   ].join("\n");
 }
 
