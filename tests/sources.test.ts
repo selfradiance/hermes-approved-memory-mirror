@@ -893,6 +893,12 @@ describe("sources UI", () => {
     const html = await response.text();
     expect(response.status).toBe(200);
     expect(html).toContain("Import a source");
+    expect(html).toContain("Choose a file or paste text below");
+    expect(html).toContain("Paste Markdown or text");
+    expect(html).toContain("Import pasted source");
+    expect(html).toContain(
+      "Sources are raw material. They are not approved context until you create and approve suggestions."
+    );
     expect(html).toContain("Suggest context from this source");
     expect(html).toContain("Rename source");
     expect(html).toContain("Delete source");
@@ -920,5 +926,32 @@ describe("sources UI", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("Renamed source &quot;Storyboard packet source&quot;.");
     expect(listSources(runtime(root))[0]?.title).toBe("Storyboard packet source");
+  });
+
+  it("imports a pasted Markdown source without approving context or creating suggestions", async () => {
+    const root = makeProject();
+
+    const response = await handleUiRequest(
+      new Request("http://127.0.0.1/sources/import", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          importMode: "paste",
+          title: "Pasted assistant notes",
+          pastedContent: SAMPLE_MARKDOWN
+        })
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const [source] = listSources(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Imported &quot;Pasted assistant notes&quot; as a source");
+    expect(source?.title).toBe("Pasted assistant notes");
+    expect(source?.original_filename).toBe("pasted-assistant-notes.md");
+    expect(getSourceChunks(source!.id, runtime(root)).length).toBeGreaterThan(0);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
   });
 });

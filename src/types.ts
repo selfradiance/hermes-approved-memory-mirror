@@ -241,3 +241,12 @@ export interface ProjectMemoryPackExport {
   generatedAt: string;
   memoryIds: number[];
 }
+
+export interface SavedContextPack {
+  id: number;
+  title: string;
+  created_at: string;
+  markdown: string;
+  filename: string | null;
+  export_path: string | null;
+}

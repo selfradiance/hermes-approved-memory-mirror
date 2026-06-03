@@ -155,11 +155,11 @@ In local deterministic mode the detector is local and rule-based. In optional Cl
 
 LLM Context Pack Export creates a clean Markdown context pack from selected active approved context. It is designed for Claude Code, Codex, ChatGPT, Claude, Gemini, and similar tools: copy/paste durable project context into a current work order without giving an assistant access to the local store.
 
-In the UI, open **LLM context pack** at `/memory-pack`, search approved context, select the context to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. Generating the pack renders the full Markdown directly on the page with **Copy context pack** as the primary action, while **Download Markdown** and the local file under `.hermes/export/` remain secondary.
+In the UI, open **LLM context pack** at `/memory-pack`, search approved context, select the context to include, enter a project name, and optionally add the current next step or **Settled decisions / things not to reopen**. Add decisions that are already settled, so a coding assistant does not waste time suggesting them again. Generating the pack renders the full Markdown directly on the page with **Copy context pack** as the primary action, while **Download Markdown** and the local file under `.hermes/export/` remain secondary. You can also **Save context pack** to keep a reusable Markdown export snapshot in ContextCrate for later viewing, copying, or downloading.
 
 The pack includes the generated timestamp, a note that it came from human-approved context, project title, optional next-step and settled-decisions sections, selected approved context grouped by project decisions, preferences / working style, creative workflow, cautions / risks, and other, plus a footer that states the pack is not permission to edit files, commit, push, run commands, access accounts, or take external actions.
 
-This feature does not connect to agents, MCP, GitHub, editors, shells, accounts, or external services. It does not write into any repo. It exports active approved context only and grants no action authority. The approval invariant is unchanged: only explicit human approval creates approved context.
+This feature does not connect to agents, MCP, GitHub, editors, shells, accounts, or external services. It does not write into any repo. It exports active approved context only and grants no action authority. Saved context packs are export artifacts, not approved context. The approval invariant is unchanged: only explicit human approval creates approved context.
 
 ## Sources (Markdown / Text Import)
 
@@ -167,19 +167,19 @@ As of v0.4.0 you can import local documents into a **source library**. A source 
 
 - Supported types: Markdown (`.md`, `.markdown`) and plain text (`.txt`). Other file types are rejected with a friendly message.
 - Size limit: about 1 MB of text per file. Larger files are rejected.
-- Sources stay local. The file you choose is read in your browser and its text is stored in the same local SQLite database under `.hermes/`. The app never reads arbitrary filesystem paths — only the file you explicitly select.
+- Sources stay local. The file you choose is read in your browser and its text is stored in the same local SQLite database under `.hermes/`. You can also paste Markdown/text directly into the Sources page. The app never reads arbitrary filesystem paths — only the file you explicitly select or the text you paste.
 - Imported text is split into ordered **excerpts** (chunks) so it can be searched and shown in readable pieces.
 
 In the `Sources` page (linked from the chat header) you can:
 
-1. Import a Markdown or text file.
+1. Import a Markdown or text file, or paste Markdown/text directly.
 2. See your sources with title, filename, import date, and excerpt count.
 3. Rename a source title or delete a raw imported source.
 4. Search inside your sources.
 5. View a source's excerpts.
 6. Use **Suggest context from this source** to create save-for-review items. You choose how many to ask for (1–10, default 7). These are never auto-approved; approval still happens through the review flow, and every suggestion is editable before you approve it. As of v0.4.3 the suggestions you just created appear **inline on the Sources page**, so you can edit, approve, or dismiss each one without leaving Sources.
 
-Deleting a source removes the imported raw source and excerpts. Approved context already created from that source remains approved context, and pending drafts are not cleaned up automatically.
+Pasted source import creates a raw source only. It does not create approved context or pending context suggestions unless you separately click **Suggest context from this source**. Deleting a source removes the imported raw source and excerpts. Approved context already created from that source remains approved context, and pending drafts are not cleaned up automatically.
 
 ### How source context extraction works (v0.4.2)
 
@@ -288,6 +288,8 @@ Release notes for v0.1.0 are in [docs/releases/v0.1.0.md](docs/releases/v0.1.0.m
 `memory_suggestion_dismissals` stores local dismissal markers so an ignored organic suggestion does not keep reappearing for the same chat message.
 
 `sources` stores imported documents (title, original filename, type, import time, content hash, size, status). `source_chunks` stores the ordered excerpts for each source. Sources are raw imported text and are never treated as approved context; only explicit draft approval writes `memory_entries`. Deleting a source removes the source row and its excerpts, not approved context previously created from it.
+
+`context_packs` stores saved Markdown context-pack export snapshots (title, timestamp, Markdown, optional filename/export path). Saved packs are reusable artifacts for later copy/download and never create approved context.
 
 ## Human Approval Flow
 

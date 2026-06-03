@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { openDatabase, tableExists, TABLES } from "./db.js";
+import { initializeSchema, openDatabase, tableExists, TABLES } from "./db.js";
 import { createDraftProposalFromText } from "./draftGeneration.js";
 import {
   createDraftFromText,
@@ -1256,6 +1256,7 @@ function getChatMessageByIdOrThrow(db: Database.Database, messageId: number): Ch
 
 function openExistingChatDb(options: HermesRuntimeOptions): Database.Database {
   const db = openDatabase(options, "existing");
+  initializeSchema(db);
   const missingTable = TABLES.find((table) => !tableExists(db, table));
   if (missingTable) {
     db.close();

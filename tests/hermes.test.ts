@@ -8,6 +8,7 @@ import {
   editApprovedMemory,
   exportApprovedMemories,
   exportProjectMemoryPack,
+  getSavedContextPack,
   initHermes,
   intakeFile,
   intakeText,
@@ -15,10 +16,12 @@ import {
   listMemoryEvents,
   listPendingDrafts,
   listRetiredMemories,
+  listSavedContextPacks,
   reflectOnApprovedMemory,
   rejectDraft,
   retireApprovedMemory,
   retrieveRelevantApprovedMemories,
+  saveContextPack,
   searchApprovedMemories
 } from "../src/hermes.js";
 import type { HermesRuntimeOptions } from "../src/types.js";
@@ -55,6 +58,7 @@ describe("HERmes v0.1", () => {
     expect(report.tables.chat_sessions).toBe(true);
     expect(report.tables.chat_messages).toBe(true);
     expect(report.tables.memory_suggestion_dismissals).toBe(true);
+    expect(report.tables.context_packs).toBe(true);
   });
 
   it("intake creates pending draft, not approved memory", () => {
@@ -281,6 +285,42 @@ describe("HERmes v0.1", () => {
     expect(result.markdown).toContain("Replacement project pack memory.");
     expect(result.markdown).not.toContain("Retired project pack memory.");
     expect(result.markdown).not.toContain("Old project pack memory.");
+  });
+
+  it("saves generated context packs as export snapshots without creating approved context", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const saved = saveContextPack(
+      {
+        title: "Reusable handoff pack",
+        markdown: "# Reusable handoff pack\n\nApproved context snapshot.",
+        exportPath: path.join(root, ".hermes", "export", "reusable-handoff-pack.md"),
+        createdAt: new Date("2026-06-03T16:20:00.000Z")
+      },
+      runtime(root)
+    );
+
+    expect(saved.id).toBe(1);
+    expect(saved.title).toBe("Reusable handoff pack");
+    expect(saved.created_at).toBe("2026-06-03T16:20:00.000Z");
+    expect(saved.markdown).toContain("Approved context snapshot.");
+    expect(saved.filename).toBe("reusable-handoff-pack.md");
+    expect(saved.export_path).toBe(path.join(root, ".hermes", "export", "reusable-handoff-pack.md"));
+    expect(listSavedContextPacks(runtime(root))).toHaveLength(1);
+    expect(getSavedContextPack(saved.id, runtime(root))?.markdown).toBe(saved.markdown);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+    expect(listMemoryEvents(runtime(root)).map((event) => event.event_type)).toContain("context_pack_saved");
+  });
+
+  it("lists saved context packs newest first", () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    saveContextPack({ title: "First pack", markdown: "# First" }, runtime(root));
+    saveContextPack({ title: "Second pack", markdown: "# Second" }, runtime(root));
+
+    expect(listSavedContextPacks(runtime(root)).map((pack) => pack.title)).toEqual(["Second pack", "First pack"]);
   });
 
   it("file intake does not crawl directories", () => {

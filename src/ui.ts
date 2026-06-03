@@ -22,15 +22,18 @@ import {
   ensureHermesInitialized,
   exportApprovedMemories,
   exportProjectMemoryPack,
+  getSavedContextPack,
   initHermes,
   intakeText,
   listApprovedMemories,
   listPendingDrafts,
   listRetiredMemories,
+  listSavedContextPacks,
   reflectOnApprovedMemory,
   rejectDraft,
   retireApprovedMemory,
   searchApprovedMemories,
+  saveContextPack,
   updateDraftProposedContent
 } from "./hermes.js";
 import {
@@ -56,6 +59,7 @@ import type {
   MemorySuggestion,
   ReflectionReport,
   SearchResult,
+  SavedContextPack,
   SourceChunk,
   SourceChunkResult,
   SourceSummary
@@ -91,6 +95,7 @@ interface RenderState {
   memoryPackTitle?: string;
   memoryPackCurrentNextStep?: string;
   memoryPackSettledDecisions?: string;
+  selectedSavedContextPackId?: number;
 }
 
 export interface UiServerOptions extends HermesRuntimeOptions {
@@ -259,11 +264,19 @@ export async function handleUiRequest(
     if (request.method === "GET" && url.pathname === "/memory-pack") {
       const searchQuery = (url.searchParams.get("query") ?? "").trim();
       const searchResults = searchQuery ? searchApprovedMemories(searchQuery, runtime) : undefined;
-      return htmlResponse(renderMemoryPackPage(runtime, { searchQuery, searchResults }));
+      const selectedSavedContextPackId = parseOptionalPositiveInteger(url.searchParams.get("savedPack") ?? "");
+      return htmlResponse(
+        renderMemoryPackPage(runtime, { searchQuery, searchResults, selectedSavedContextPackId })
+      );
     }
 
     if (request.method === "GET" && url.pathname === "/memory-pack/download") {
       return markdownDownloadResponse(runtime, url.searchParams.get("file") ?? "");
+    }
+
+    if (request.method === "GET" && url.pathname === "/memory-pack/saved/download") {
+      const packId = parsePositiveInteger(url.searchParams.get("id") ?? "", "Saved context pack id");
+      return savedContextPackDownloadResponse(runtime, packId);
     }
 
     if (request.method === "POST" && url.pathname === "/memory-pack/export") {
@@ -290,6 +303,20 @@ export async function handleUiRequest(
           memoryPackTitle: title,
           memoryPackCurrentNextStep: currentNextStep,
           memoryPackSettledDecisions: settledDecisions
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/memory-pack/save") {
+      const form = await readForm(request);
+      const title = requiredFormValue(form, "title", "Context pack title is required.");
+      const markdown = requiredFormValue(form, "markdown", "Generated context pack is required.");
+      const exportPath = optionalFormValue(form, "exportPath");
+      const saved = saveContextPack({ title, markdown, exportPath }, runtime);
+      return htmlResponse(
+        renderMemoryPackPage(runtime, {
+          selectedSavedContextPackId: saved.id,
+          notice: { kind: "success", message: `Saved context pack "${saved.title}".` }
         })
       );
     }
@@ -479,10 +506,27 @@ export async function handleUiRequest(
 
     if (request.method === "POST" && url.pathname === "/sources/import") {
       const form = await readForm(request);
-      const filename = requiredFormValue(form, "filename", "A file is required to import a source.");
-      const content = form.get("content") ?? "";
-      const title = (form.get("title") ?? "").trim() || undefined;
-      const source = importSource({ filename, content, title }, runtime);
+      const pastedContent = (form.get("pastedContent") ?? "").trim();
+      const importMode = (form.get("importMode") ?? "").trim();
+      const titleValue = (form.get("title") ?? "").trim();
+      const source =
+        importMode === "paste" || pastedContent
+          ? importSource(
+              {
+                filename: filenameForPastedSource(titleValue || titleFromPastedMemory(pastedContent)),
+                content: requiredTextValue(pastedContent, "Paste Markdown or text to import a source."),
+                title: titleValue || titleFromPastedMemory(pastedContent)
+              },
+              runtime
+            )
+          : importSource(
+              {
+                filename: requiredFormValue(form, "filename", "Choose a file or paste text below."),
+                content: form.get("content") ?? "",
+                title: titleValue || undefined
+              },
+              runtime
+            );
       return htmlResponse(
         renderSourcesPage(runtime, {
           selectedSourceId: source.id,
@@ -1482,6 +1526,10 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     ? (model.searchResults ?? []).map(({ memory }) => memory)
     : model.approvedMemories;
   const selectedIds = state.memoryPackSelectedIds ?? [];
+  const selectedSavedPack =
+    state.selectedSavedContextPackId !== undefined
+      ? getSavedContextPack(state.selectedSavedContextPackId, runtime)
+      : undefined;
   const downloadFileName = state.exportPath ? path.basename(state.exportPath) : undefined;
   const downloadHref = downloadFileName
     ? `/memory-pack/download?file=${encodeURIComponent(downloadFileName)}`
@@ -1544,6 +1592,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     textarea { min-height: 96px; resize: vertical; }
     textarea.preview { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92rem; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .hidden-field { display: none; }
     .memory-choice-list { display: grid; gap: 10px; }
     .memory-choice {
       display: grid;
@@ -1556,6 +1605,8 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
     }
     .memory-choice:first-child { border-top: 0; padding-top: 0; }
     .memory-choice input { margin-top: 5px; }
+    .item { border-top: 1px solid var(--line); padding-top: 12px; }
+    .item:first-child { border-top: 0; padding-top: 0; }
     .item-title { display: block; margin: 0 0 5px; font-weight: 750; }
     .content { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
     @media (max-width: 760px) {
@@ -1581,8 +1632,14 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
         <h2>Generated context pack</h2>
         <p class="hint">Copy this Markdown into Codex, Claude, ChatGPT, Gemini, or another LLM.</p>
         <div class="actions" style="margin-top: 12px;">
-          <button type="button" id="copy-context-pack">Copy context pack</button>
+          <button type="button" id="copy-context-pack" data-copy-target="generated-context-pack">Copy context pack</button>
           ${downloadHref ? `<a class="link-button" href="${escapeAttribute(downloadHref)}">Download Markdown</a>` : ""}
+          <form method="post" action="/memory-pack/save">
+            <input type="hidden" name="title" value="${escapeAttribute(state.memoryPackTitle ?? "LLM context pack")}">
+            <input type="hidden" name="exportPath" value="${escapeAttribute(state.exportPath)}">
+            <textarea class="hidden-field" name="markdown">${escapeHtml(state.memoryPackMarkdown)}</textarea>
+            <button class="secondary" type="submit">Save context pack</button>
+          </form>
         </div>
         <p class="notice info" style="margin-top: 12px;">Local export path: ${escapeHtml(state.exportPath)}</p>
         <label style="margin-top: 14px;">
@@ -1592,6 +1649,23 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       </section>`
           : ""
       }
+
+      <section>
+        <h2>Saved context packs</h2>
+        <p class="hint">Saved context packs are reusable Markdown export snapshots. Saving one does not create approved context or approve pending suggestions.</p>
+        ${
+          selectedSavedPack
+            ? `<div style="margin-top: 14px;">
+          ${renderSavedContextPackCopyArea(selectedSavedPack)}
+        </div>`
+            : state.selectedSavedContextPackId !== undefined
+              ? `<p class="empty" style="margin-top: 14px;">Saved context pack ${state.selectedSavedContextPackId} was not found.</p>`
+              : ""
+        }
+        <div class="stack" style="margin-top: 14px;">
+          ${renderSavedContextPackList(model.savedContextPacks)}
+        </div>
+      </section>
 
       <section>
         <h2>Find approved context</h2>
@@ -1642,29 +1716,63 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
       </section>
     </main>
   </div>
-  ${
-    state.memoryPackMarkdown
-      ? `<script>
+  <script>
     (function () {
-      var button = document.getElementById("copy-context-pack");
-      var pack = document.getElementById("generated-context-pack");
-      if (!button || !pack) { return; }
-      button.addEventListener("click", async function () {
-        if (!navigator.clipboard) {
-          pack.focus();
-          pack.select();
-          button.textContent = "Select and copy";
-          return;
-        }
-        await navigator.clipboard.writeText(pack.value);
-        button.textContent = "Copied";
+      var buttons = document.querySelectorAll("[data-copy-target]");
+      buttons.forEach(function (button) {
+        button.addEventListener("click", async function () {
+          var targetId = button.getAttribute("data-copy-target");
+          var pack = targetId ? document.getElementById(targetId) : null;
+          if (!pack) { return; }
+          if (!navigator.clipboard) {
+            pack.focus();
+            pack.select();
+            button.textContent = "Select and copy";
+            return;
+          }
+          await navigator.clipboard.writeText(pack.value);
+          button.textContent = "Copied";
+        });
       });
     })();
-  </script>`
-      : ""
-  }
+  </script>
 </body>
 </html>`;
+}
+
+function renderSavedContextPackCopyArea(pack: SavedContextPack): string {
+  const textareaId = `saved-context-pack-${pack.id}`;
+  return `<article class="item">
+    <p class="item-title">${escapeHtml(pack.title)}</p>
+    <p class="meta">Saved: ${escapeHtml(pack.created_at)}${pack.filename ? ` · File: ${escapeHtml(pack.filename)}` : ""}</p>
+    <div class="actions" style="margin-top: 10px;">
+      <button type="button" id="copy-saved-context-pack" data-copy-target="${textareaId}">Copy context pack</button>
+      <a class="link-button" href="/memory-pack/saved/download?id=${pack.id}">Download Markdown</a>
+    </div>
+    <label style="margin-top: 14px;">
+      Generated context pack
+      <textarea class="preview" id="${textareaId}" readonly>${escapeHtml(pack.markdown)}</textarea>
+    </label>
+  </article>`;
+}
+
+function renderSavedContextPackList(packs: SavedContextPack[]): string {
+  if (packs.length === 0) {
+    return `<p class="empty">No saved context packs yet.</p>`;
+  }
+
+  return packs
+    .map(
+      (pack) => `<article class="item">
+      <p class="item-title">${escapeHtml(pack.title)}</p>
+      <p class="meta">Saved: ${escapeHtml(pack.created_at)}${pack.filename ? ` · File: ${escapeHtml(pack.filename)}` : ""}</p>
+      <div class="actions" style="margin-top: 10px;">
+        <a class="link-button" href="/memory-pack?savedPack=${pack.id}">View saved pack</a>
+        <a class="link-button" href="/memory-pack/saved/download?id=${pack.id}">Download Markdown</a>
+      </div>
+    </article>`
+    )
+    .join("");
 }
 
 function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {}): string {
@@ -1739,10 +1847,11 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
     .notice.info { background: #eef5fb; color: var(--blue); border-color: #c8d9e7; }
     .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
     label { display: grid; gap: 7px; font-weight: 650; }
-    input[type="search"], input[type="text"], input[type="file"], input[type="number"] {
+    textarea, input[type="search"], input[type="text"], input[type="file"], input[type="number"] {
       width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 11px 12px;
       color: var(--ink); background: #fff; font: inherit;
     }
+    textarea { min-height: 180px; resize: vertical; }
     .suggest-form { display: grid; gap: 8px; }
     .suggest-count { max-width: 280px; }
     .suggest-count input[type="number"] { width: 96px; }
@@ -1794,13 +1903,14 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
 
       <section>
         <h2>Import a source</h2>
-        <p class="hint">Markdown (.md, .markdown) or plain text (.txt), up to about 1 MB of text. The file stays on your computer.</p>
+        <p class="hint">Choose a file or paste text below. Markdown (.md, .markdown) and plain text (.txt) are supported, up to about 1 MB of text.</p>
+        <p class="hint">Sources are raw material. They are not approved context until you create and approve suggestions.</p>
         ${
           model.canReadMemory
             ? `<form class="stack" method="post" action="/sources/import" id="import-form" style="margin-top: 12px;">
                 <label>
-                  Title (optional)
-                  <input type="text" name="title" placeholder="A short name for this source">
+                  Source title
+                  <input type="text" name="title" id="source-title" placeholder="A short name for this source">
                 </label>
                 <label>
                   Choose a file
@@ -1808,8 +1918,13 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
                 </label>
                 <input type="hidden" name="filename" id="source-filename">
                 <input type="hidden" name="content" id="source-content">
+                <label>
+                  Paste Markdown or text
+                  <textarea name="pastedContent" id="source-pasted-content" placeholder="Paste Markdown or text to import as a raw source."></textarea>
+                </label>
                 <div class="actions">
-                  <button type="submit">Import source</button>
+                  <button type="submit" name="importMode" value="file">Import source</button>
+                  <button class="secondary" type="submit" name="importMode" value="paste">Import pasted source</button>
                 </div>
               </form>`
             : `<p class="empty">Your local context store could not be opened, so importing is unavailable.</p>`
@@ -1847,11 +1962,23 @@ function renderSourcesPage(runtime: HermesRuntimeOptions, state: RenderState = {
       var fileInput = document.getElementById("source-file");
       var filenameField = document.getElementById("source-filename");
       var contentField = document.getElementById("source-content");
+      var pastedField = document.getElementById("source-pasted-content");
       form.addEventListener("submit", function (event) {
+        var submitter = event.submitter;
+        var mode = submitter && submitter.getAttribute("value");
+        if (mode === "paste" || (pastedField && pastedField.value.trim())) {
+          if (!pastedField || !pastedField.value.trim()) {
+            event.preventDefault();
+            alert("Paste Markdown or text to import a source.");
+          }
+          if (filenameField) { filenameField.value = ""; }
+          if (contentField) { contentField.value = ""; }
+          return;
+        }
         var file = fileInput && fileInput.files && fileInput.files[0];
         if (!file) {
           event.preventDefault();
-          alert("Please choose a Markdown or text file to import.");
+          alert("Choose a file or paste text below.");
           return;
         }
         if (contentField.value) { return; }
@@ -1973,6 +2100,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
   const pendingDrafts = canReadMemory ? listPendingDrafts(runtime) : [];
   const approvedMemories = canReadMemory ? listApprovedMemories(runtime) : [];
   const retiredMemories = canReadMemory ? listRetiredMemories(runtime) : [];
+  const savedContextPacks = canReadMemory ? listSavedContextPacks(runtime) : [];
   const chatSessions = canReadMemory ? listChatSessions(runtime) : [];
   const activeSessionId = state.chatTurn?.session.id ?? state.activeSessionId ?? chatSessions.at(-1)?.id;
   const chatMessages =
@@ -2003,6 +2131,7 @@ function readUiModel(runtime: HermesRuntimeOptions, state: RenderState) {
     pendingDrafts,
     approvedMemories,
     retiredMemories,
+    savedContextPacks,
     chatSessions,
     activeSessionId,
     chatMessages,
@@ -2497,6 +2626,34 @@ function markdownDownloadResponse(runtime: HermesRuntimeOptions, requestedFile: 
   });
 }
 
+function savedContextPackDownloadResponse(runtime: HermesRuntimeOptions, packId: number): Response {
+  const pack = getSavedContextPack(packId, runtime);
+  if (!pack) {
+    throw new Error(`Saved context pack ${packId} was not found.`);
+  }
+  const fileName = filenameForSavedContextPack(pack);
+  return new Response(`${pack.markdown}\n`, {
+    status: 200,
+    headers: {
+      "content-type": "text/markdown; charset=utf-8",
+      "content-disposition": `attachment; filename="${fileName}"`,
+      "cache-control": "no-store"
+    }
+  });
+}
+
+function filenameForSavedContextPack(pack: SavedContextPack): string {
+  if (pack.filename && /^[A-Za-z0-9._-]+\.md$/.test(pack.filename)) {
+    return pack.filename;
+  }
+  const slug = pack.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `${slug || "saved-context-pack"}-${pack.id}.md`;
+}
+
 async function readForm(request: Request): Promise<URLSearchParams> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes(POST_CONTENT_TYPE)) {
@@ -2511,6 +2668,14 @@ function requiredFormValue(form: URLSearchParams, key: string, message: string):
     throw new Error(message);
   }
   return value;
+}
+
+function requiredTextValue(value: string, message: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(message);
+  }
+  return normalized;
 }
 
 function optionalFormValue(form: URLSearchParams, key: string): string | undefined {
@@ -2600,6 +2765,15 @@ function titleFromPastedMemory(text: string): string {
   }
 
   return `Pasted note - ${formatLocalTimestamp(new Date())}`;
+}
+
+function filenameForPastedSource(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `${slug || "pasted-source"}.md`;
 }
 
 function trimTitle(value: string): string {

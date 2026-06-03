@@ -10,6 +10,7 @@ import {
   listApprovedMemories,
   listPendingDrafts,
   listRetiredMemories,
+  listSavedContextPacks,
   reflectOnApprovedMemory,
   retireApprovedMemory
 } from "../src/hermes.js";
@@ -494,6 +495,9 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain("Generated context pack");
     expect(html).toContain("Copy context pack");
     expect(html).toContain("Download Markdown");
+    expect(html).toContain("Save context pack");
+    expect(html).toContain("Saved context packs");
+    expect(html).toContain('action="/memory-pack/save"');
     expect(html).toContain('id="copy-context-pack"');
     expect(html).toContain('id="generated-context-pack"');
     expect(html).toContain("navigator.clipboard.writeText");
@@ -516,6 +520,50 @@ describe("HERmes Local Web Chat UI", () => {
     expect(download.status).toBe(200);
     expect(download.headers.get("content-disposition") ?? "").toContain(`filename="${files[0]}"`);
     expect(await download.text()).toBe(markdown);
+  });
+
+  it("saves, lists, views, copies, and downloads a generated context pack in the UI", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const markdown = "# Project Context Pack: Saved UI pack\n\nApproved context snapshot.";
+
+    const save = await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Saved UI pack",
+        markdown,
+        exportPath: path.join(root, ".hermes", "export", "saved-ui-pack.md")
+      }),
+      runtime(root)
+    );
+    const saveHtml = await save.text();
+    const [saved] = listSavedContextPacks(runtime(root));
+
+    expect(save.status).toBe(200);
+    expect(saved?.title).toBe("Saved UI pack");
+    expect(saved?.markdown).toBe(markdown);
+    expect(saveHtml).toContain("Saved context packs");
+    expect(saveHtml).toContain("Saved context pack &quot;Saved UI pack&quot;.");
+    expect(saveHtml).toContain('id="copy-saved-context-pack"');
+    expect(saveHtml).toContain("Copy context pack");
+    expect(saveHtml).toContain("Download Markdown");
+    expect(saveHtml).toContain(markdown);
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+
+    const view = await handleUiRequest(getRequest(`/memory-pack?savedPack=${saved!.id}`), runtime(root));
+    const viewHtml = await view.text();
+    expect(view.status).toBe(200);
+    expect(viewHtml).toContain("Generated context pack");
+    expect(viewHtml).toContain(markdown);
+    expect(viewHtml).toContain("navigator.clipboard.writeText");
+
+    const download = await handleUiRequest(
+      getRequest(`/memory-pack/saved/download?id=${saved!.id}`),
+      runtime(root)
+    );
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition") ?? "").toContain('filename="saved-ui-pack.md"');
+    expect(await download.text()).toBe(`${markdown}\n`);
   });
 
   it("editing an approved memory through the UI creates an active replacement", async () => {

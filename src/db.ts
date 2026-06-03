@@ -11,7 +11,8 @@ export const TABLES = [
   "chat_messages",
   "memory_suggestion_dismissals",
   "sources",
-  "source_chunks"
+  "source_chunks",
+  "context_packs"
 ] as const;
 
 const DB_FILE_RE = /^[A-Za-z0-9._-]+\.db$/;
@@ -141,6 +142,15 @@ export function initializeSchema(db: Database.Database): void {
       UNIQUE(source_id, chunk_index)
     );
 
+    CREATE TABLE IF NOT EXISTS context_packs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      filename TEXT,
+      export_path TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_memory_entries_status ON memory_entries(status);
     CREATE INDEX IF NOT EXISTS idx_memory_entries_source ON memory_entries(source_type, source_label);
     CREATE INDEX IF NOT EXISTS idx_memory_drafts_status ON memory_drafts(status);
@@ -150,6 +160,7 @@ export function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_memory_suggestion_dismissals_message ON memory_suggestion_dismissals(session_id, message_id);
     CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status);
     CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, chunk_index);
+    CREATE INDEX IF NOT EXISTS idx_context_packs_created_at ON context_packs(created_at);
   `);
 
   ensureColumn(db, "memory_entries", "retired_at", "TEXT");

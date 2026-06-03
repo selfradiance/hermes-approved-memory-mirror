@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import { openDatabase, tableExists, TABLES } from "./db.js";
+import { initializeSchema, openDatabase, tableExists, TABLES } from "./db.js";
 import { createDraftFromProposal, listApprovedMemories, listPendingDrafts } from "./hermes.js";
 import { detectCategory, detectTags } from "./draftGeneration.js";
 import { resolveChatModeConfig } from "./llm/chatMode.js";
@@ -900,6 +900,7 @@ function escapeLike(value: string): string {
 
 function openExistingDb(options: HermesRuntimeOptions): Database.Database {
   const db = openDatabase(options, "existing");
+  initializeSchema(db);
   const missingTable = TABLES.find((table) => !tableExists(db, table));
   if (missingTable) {
     db.close();

@@ -15,6 +15,7 @@ import type {
   MemoryEvent,
   ProjectMemoryPackExport,
   ReflectionReport,
+  SavedContextPack,
   SearchResult
 } from "./types.js";
 
@@ -557,6 +558,85 @@ export function exportProjectMemoryPack(
   }
 }
 
+export function saveContextPack(
+  input: {
+    title: string;
+    markdown: string;
+    exportPath?: string;
+    createdAt?: Date;
+  },
+  options: HermesRuntimeOptions = {}
+): SavedContextPack {
+  const title = normalizeMemoryPackField(input.title);
+  if (!title) {
+    throw new Error("Context pack title is required.");
+  }
+  const markdown = normalizeMemoryPackMarkdown(input.markdown);
+  if (!markdown) {
+    throw new Error("Generated context pack is required.");
+  }
+  const createdDate = input.createdAt ?? new Date();
+  if (Number.isNaN(createdDate.getTime())) {
+    throw new Error("Saved context pack timestamp is invalid.");
+  }
+  const createdAt = createdDate.toISOString();
+  const exportPath = input.exportPath?.trim() || undefined;
+  const filename = exportPath ? path.basename(exportPath) : undefined;
+  const db = openExistingDb(options);
+  try {
+    const insert = db.transaction(() => {
+      const info = db
+        .prepare(
+          `INSERT INTO context_packs (
+            title,
+            created_at,
+            markdown,
+            filename,
+            export_path
+          ) VALUES (?, ?, ?, ?, ?)`
+        )
+        .run(title, createdAt, markdown, filename ?? null, exportPath ?? null);
+      const packId = Number(info.lastInsertRowid);
+      insertEvent(db, {
+        event_type: "context_pack_saved",
+        created_at: createdAt,
+        details: {
+          contextPackId: packId,
+          title,
+          exportPath: exportPath ?? null
+        }
+      });
+      return getSavedContextPackByIdOrThrow(db, packId);
+    });
+    return insert();
+  } finally {
+    db.close();
+  }
+}
+
+export function listSavedContextPacks(options: HermesRuntimeOptions = {}): SavedContextPack[] {
+  const db = openExistingDb(options);
+  try {
+    return db
+      .prepare("SELECT * FROM context_packs ORDER BY id DESC")
+      .all() as SavedContextPack[];
+  } finally {
+    db.close();
+  }
+}
+
+export function getSavedContextPack(
+  packId: number,
+  options: HermesRuntimeOptions = {}
+): SavedContextPack | undefined {
+  const db = openExistingDb(options);
+  try {
+    return db.prepare("SELECT * FROM context_packs WHERE id = ?").get(packId) as SavedContextPack | undefined;
+  } finally {
+    db.close();
+  }
+}
+
 export function doctor(options: HermesRuntimeOptions = {}): DoctorReport {
   const paths = resolveHermesPaths(options);
   const dbExists = fs.existsSync(paths.dbPath);
@@ -748,6 +828,14 @@ function getMemoryByIdOrThrow(db: Database.Database, memoryId: number): MemoryEn
     throw new Error(`Memory ${memoryId} was not found.`);
   }
   return memory;
+}
+
+function getSavedContextPackByIdOrThrow(db: Database.Database, packId: number): SavedContextPack {
+  const pack = db.prepare("SELECT * FROM context_packs WHERE id = ?").get(packId) as SavedContextPack | undefined;
+  if (!pack) {
+    throw new Error(`Saved context pack ${packId} was not found.`);
+  }
+  return pack;
 }
 
 function insertEvent(
@@ -959,6 +1047,10 @@ function resolveMemoryPackExportPath(paths: HermesPaths, outPath: string | undef
 
 function normalizeMemoryPackField(value: string): string {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
+function normalizeMemoryPackMarkdown(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
 }
 
 function uniquePositiveIds(ids: number[]): number[] {
