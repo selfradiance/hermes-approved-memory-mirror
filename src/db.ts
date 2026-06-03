@@ -165,6 +165,7 @@ export function initializeSchema(db: Database.Database): void {
 
   ensureColumn(db, "memory_entries", "retired_at", "TEXT");
   ensureColumn(db, "memory_entries", "retired_reason", "TEXT");
+  ensureColumn(db, "context_packs", "description", "TEXT");
 }
 
 export function tableExists(db: Database.Database, tableName: string): boolean {

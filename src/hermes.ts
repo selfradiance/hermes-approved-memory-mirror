@@ -608,6 +608,7 @@ function loadIncludedCrateSources(db: Database.Database, sourceIds: number[]): I
 export function saveContextPack(
   input: {
     title: string;
+    description?: string;
     markdown: string;
     exportPath?: string;
     createdAt?: Date;
@@ -618,6 +619,7 @@ export function saveContextPack(
   if (!title) {
     throw new Error("Context pack title is required.");
   }
+  const description = normalizeMemoryPackField(input.description ?? "") || undefined;
   const markdown = normalizeMemoryPackMarkdown(input.markdown);
   if (!markdown) {
     throw new Error("Generated context pack is required.");
@@ -636,13 +638,14 @@ export function saveContextPack(
         .prepare(
           `INSERT INTO context_packs (
             title,
+            description,
             created_at,
             markdown,
             filename,
             export_path
-          ) VALUES (?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?)`
         )
-        .run(title, createdAt, markdown, filename ?? null, exportPath ?? null);
+        .run(title, description ?? null, createdAt, markdown, filename ?? null, exportPath ?? null);
       const packId = Number(info.lastInsertRowid);
       insertEvent(db, {
         event_type: "context_pack_saved",
@@ -656,6 +659,48 @@ export function saveContextPack(
       return getSavedContextPackByIdOrThrow(db, packId);
     });
     return insert();
+  } finally {
+    db.close();
+  }
+}
+
+// Updates only the saved crate's title/description metadata. The Markdown
+// snapshot, approved context, sources, and pending suggestions are untouched.
+export function renameContextPack(
+  input: { packId: number; title: string; description?: string },
+  options: HermesRuntimeOptions = {}
+): SavedContextPack {
+  if (!Number.isInteger(input.packId) || input.packId <= 0) {
+    throw new Error("Saved context pack id must be a positive integer.");
+  }
+  const title = normalizeMemoryPackField(input.title);
+  if (!title) {
+    throw new Error("Context pack title is required.");
+  }
+  const description =
+    input.description === undefined
+      ? undefined
+      : normalizeMemoryPackField(input.description) || null;
+  const db = openExistingDb(options);
+  try {
+    const update = db.transaction(() => {
+      const pack = getSavedContextPackByIdOrThrow(db, input.packId);
+      if (description === undefined) {
+        db.prepare("UPDATE context_packs SET title = ? WHERE id = ?").run(title, input.packId);
+      } else {
+        db.prepare("UPDATE context_packs SET title = ?, description = ? WHERE id = ?").run(
+          title,
+          description,
+          input.packId
+        );
+      }
+      insertEvent(db, {
+        event_type: "context_pack_renamed",
+        details: { contextPackId: input.packId, title, previousTitle: pack.title }
+      });
+      return getSavedContextPackByIdOrThrow(db, input.packId);
+    });
+    return update();
   } finally {
     db.close();
   }

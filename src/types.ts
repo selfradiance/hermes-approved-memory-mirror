@@ -245,6 +245,7 @@ export interface ProjectMemoryPackExport {
 export interface SavedContextPack {
   id: number;
   title: string;
+  description: string | null;
   created_at: string;
   markdown: string;
   filename: string | null;

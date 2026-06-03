@@ -656,6 +656,129 @@ describe("HERmes Local Web Chat UI", () => {
     expect(html).toContain("Source review workflow");
   });
 
+  it("crate cards show a Rename crate control", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Renamable crate",
+        markdown: "# Project Context Pack: Renamable crate\n\nSnapshot.",
+        exportPath: path.join(root, ".hermes", "export", "renamable.md")
+      }),
+      runtime(root)
+    );
+
+    const response = await handleUiRequest(getRequest("/memory-pack"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Rename crate");
+    expect(html).toContain('action="/memory-pack/rename"');
+  });
+
+  it("renaming a saved crate updates the title without touching approved context", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    const [draft] = intakeText("Approved context that must survive a crate rename.", runtime(root));
+    const memory = approveDraft(draft.id, runtime(root));
+    await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Original crate title",
+        markdown: "# Project Context Pack: Original crate title\n\nSnapshot.",
+        exportPath: path.join(root, ".hermes", "export", "rename-me.md")
+      }),
+      runtime(root)
+    );
+    const [saved] = listSavedContextPacks(runtime(root));
+    const originalMarkdown = saved!.markdown;
+
+    const response = await handleUiRequest(
+      formRequest("/memory-pack/rename", {
+        id: String(saved!.id),
+        title: "Renamed crate title"
+      }),
+      runtime(root)
+    );
+    const html = await response.text();
+    const [updated] = listSavedContextPacks(runtime(root));
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('Updated crate &quot;Renamed crate title&quot;.');
+    expect(updated!.title).toBe("Renamed crate title");
+    expect(updated!.markdown).toBe(originalMarkdown);
+    expect(listApprovedMemories(runtime(root)).some((item) => item.id === memory.id)).toBe(true);
+  });
+
+  it("saving a crate with a description shows it on the list and view, without creating context", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const save = await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Described crate",
+        description: "Context for the next Claude Code UI pass.",
+        markdown: "# Project Context Pack: Described crate\n\nSnapshot.",
+        exportPath: path.join(root, ".hermes", "export", "described.md")
+      }),
+      runtime(root)
+    );
+    const [saved] = listSavedContextPacks(runtime(root));
+
+    const list = await handleUiRequest(getRequest("/memory-pack"), runtime(root));
+    const listHtml = await list.text();
+    const view = await handleUiRequest(getRequest(`/memory-pack?savedPack=${saved!.id}`), runtime(root));
+    const viewHtml = await view.text();
+
+    expect(save.status).toBe(200);
+    expect(saved!.description).toBe("Context for the next Claude Code UI pass.");
+    expect(listHtml).toContain("Context for the next Claude Code UI pass.");
+    expect(viewHtml).toContain("Context for the next Claude Code UI pass.");
+    expect(listApprovedMemories(runtime(root))).toHaveLength(0);
+    expect(listSources(runtime(root))).toHaveLength(0);
+    expect(listPendingDrafts(runtime(root))).toHaveLength(0);
+  });
+
+  it("editing a crate description updates only the description", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+    await handleUiRequest(
+      formRequest("/memory-pack/save", {
+        title: "Crate with description",
+        description: "First description.",
+        markdown: "# Project Context Pack: Crate with description\n\nSnapshot.",
+        exportPath: path.join(root, ".hermes", "export", "desc-edit.md")
+      }),
+      runtime(root)
+    );
+    const [saved] = listSavedContextPacks(runtime(root));
+
+    await handleUiRequest(
+      formRequest("/memory-pack/rename", {
+        id: String(saved!.id),
+        title: saved!.title,
+        description: "Second description."
+      }),
+      runtime(root)
+    );
+    const [updated] = listSavedContextPacks(runtime(root));
+
+    expect(updated!.title).toBe("Crate with description");
+    expect(updated!.description).toBe("Second description.");
+    expect(updated!.markdown).toBe(saved!.markdown);
+  });
+
+  it("crate builder uses the clearer Task for the LLM wording and short source warning", async () => {
+    const root = makeProject();
+    initHermes(runtime(root));
+
+    const response = await handleUiRequest(getRequest("/memory-pack"), runtime(root));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Use this only when the crate should guide a specific next action.");
+    expect(html).toContain("Included sources are added to this crate only. They do not become approved context.");
+  });
+
   it("generated crate includes selected source content without creating approved context", async () => {
     const root = makeProject();
     initHermes(runtime(root));

@@ -32,6 +32,7 @@ import {
   listSavedContextPacks,
   reflectOnApprovedMemory,
   rejectDraft,
+  renameContextPack,
   retireApprovedMemory,
   searchApprovedMemories,
   saveContextPack,
@@ -332,13 +333,31 @@ export async function handleUiRequest(
     if (request.method === "POST" && url.pathname === "/memory-pack/save") {
       const form = await readForm(request);
       const title = requiredFormValue(form, "title", "Crate title is required.");
+      const description = optionalFormValue(form, "description");
       const markdown = requiredFormValue(form, "markdown", "Generated crate is required.");
       const exportPath = optionalFormValue(form, "exportPath");
-      const saved = saveContextPack({ title, markdown, exportPath }, runtime);
+      const saved = saveContextPack({ title, description, markdown, exportPath }, runtime);
       return htmlResponse(
         renderMemoryPackPage(runtime, {
           selectedSavedContextPackId: saved.id,
           notice: { kind: "success", message: `Saved crate "${saved.title}".` }
+        })
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/memory-pack/rename") {
+      const form = await readForm(request);
+      const packId = parsePositiveInteger(
+        requiredFormValue(form, "id", "Saved crate id is required."),
+        "Saved crate id"
+      );
+      const title = requiredFormValue(form, "title", "Crate title is required.");
+      const description = optionalFormValue(form, "description");
+      const renamed = renameContextPack({ packId, title, description }, runtime);
+      return htmlResponse(
+        renderMemoryPackPage(runtime, {
+          selectedSavedContextPackId: renamed.id,
+          notice: { kind: "success", message: `Updated crate "${renamed.title}".` }
         })
       );
     }
@@ -1681,10 +1700,15 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
         <div class="actions" style="margin-top: 12px;">
           <button type="button" id="copy-context-pack" data-copy-target="generated-context-pack">Copy crate</button>
           ${downloadHref ? `<a class="link-button" href="${escapeAttribute(downloadHref)}">Download Markdown</a>` : ""}
-          <form method="post" action="/memory-pack/save">
+          <form class="stack" method="post" action="/memory-pack/save">
             <input type="hidden" name="title" value="${escapeAttribute(state.memoryPackTitle ?? "Context crate")}">
             <input type="hidden" name="exportPath" value="${escapeAttribute(state.exportPath)}">
             <textarea class="hidden-field" name="markdown">${escapeHtml(state.memoryPackMarkdown)}</textarea>
+            <label>
+              Crate description
+              <span class="hint">Optional. One sentence to remind you what this crate is for.</span>
+              <input type="text" name="description" placeholder="Context for the next Claude Code UI pass.">
+            </label>
             <button class="secondary" type="submit">Save crate</button>
           </form>
         </div>
@@ -1746,7 +1770,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
           </label>
           <label>
             Task for the LLM (optional)
-            <span class="hint">Optional. Tell the LLM what you want it to do after reading this crate. Example: “Update the ContextCrate UI so sources can be selected into crates.”</span>
+            <span class="hint">Optional. Use this only when the crate should guide a specific next action. Example: “Update the crate builder so saved crates can be renamed.”</span>
             <textarea name="currentNextStep" placeholder="What should the LLM do after reading this crate?">${escapeHtml(
               state.memoryPackCurrentNextStep ?? ""
             )}</textarea>
@@ -1766,7 +1790,7 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
           </div>
           <div>
             <p class="item-title">Include sources (optional)</p>
-            <span class="hint">Sources are raw material. Including a source adds its text to the crate; it does not make the source approved context.</span>
+            <span class="hint">Included sources are added to this crate only. They do not become approved context.</span>
             <div class="memory-choice-list" style="margin-top: 10px;">
               ${renderCratePackSourceChoices(sources, selectedSourceIds)}
             </div>
@@ -1812,10 +1836,38 @@ function renderMemoryPackPage(runtime: HermesRuntimeOptions, state: RenderState 
 </html>`;
 }
 
+function renderSavedContextPackDescription(pack: SavedContextPack): string {
+  return pack.description
+    ? `<p class="meta" style="margin-top: 4px;">${escapeHtml(pack.description)}</p>`
+    : "";
+}
+
+function renderRenameContextPackForm(pack: SavedContextPack): string {
+  return `<details style="margin-top: 6px;">
+    <summary style="cursor: pointer;">Rename crate</summary>
+    <form class="stack" method="post" action="/memory-pack/rename" style="margin-top: 8px;">
+      <input type="hidden" name="id" value="${pack.id}">
+      <label>
+        Crate title
+        <input type="text" name="title" required value="${escapeAttribute(pack.title)}">
+      </label>
+      <label>
+        Crate description
+        <span class="hint">Optional. One sentence to remind you what this crate is for.</span>
+        <input type="text" name="description" value="${escapeAttribute(pack.description ?? "")}" placeholder="Context for the next Claude Code UI pass.">
+      </label>
+      <div class="actions">
+        <button class="secondary" type="submit">Save crate details</button>
+      </div>
+    </form>
+  </details>`;
+}
+
 function renderSavedContextPackCopyArea(pack: SavedContextPack): string {
   const textareaId = `saved-context-pack-${pack.id}`;
   return `<article class="item">
     <p class="item-title">${escapeHtml(pack.title)}</p>
+    ${renderSavedContextPackDescription(pack)}
     <p class="meta">Saved: ${escapeHtml(pack.created_at)}${pack.filename ? ` · File: ${escapeHtml(pack.filename)}` : ""}</p>
     <div class="actions" style="margin-top: 10px;">
       <button type="button" id="copy-saved-context-pack" data-copy-target="${textareaId}">Copy crate</button>
@@ -1825,6 +1877,7 @@ function renderSavedContextPackCopyArea(pack: SavedContextPack): string {
         <button type="submit" style="background: var(--danger);">Delete crate</button>
       </form>
     </div>
+    ${renderRenameContextPackForm(pack)}
     <p class="meta" style="margin-top: 6px;">This deletes the saved crate only. It does not delete approved context or sources.</p>
     <label style="margin-top: 14px;">
       Generated crate
@@ -1842,6 +1895,7 @@ function renderSavedContextPackList(packs: SavedContextPack[]): string {
     .map(
       (pack) => `<article class="item">
       <p class="item-title">${escapeHtml(pack.title)}</p>
+      ${renderSavedContextPackDescription(pack)}
       <p class="meta">Saved: ${escapeHtml(pack.created_at)}${pack.filename ? ` · File: ${escapeHtml(pack.filename)}` : ""}</p>
       <div class="actions" style="margin-top: 10px;">
         <a class="link-button" href="/?savedPack=${pack.id}">View crate</a>
@@ -1851,6 +1905,7 @@ function renderSavedContextPackList(packs: SavedContextPack[]): string {
           <button type="submit" style="background: var(--danger);">Delete crate</button>
         </form>
       </div>
+      ${renderRenameContextPackForm(pack)}
       <p class="meta" style="margin-top: 6px;">This deletes the saved crate only. It does not delete approved context or sources.</p>
     </article>`
     )
